@@ -113,4 +113,21 @@ describe("API routes", () => {
       expect(res.body.success).toBe(false);
     });
   });
+
+  describe("OpenAPI docs", () => {
+    it("GET /api/docs/openapi.json returns valid OpenAPI spec", async () => {
+      const res = await request(app).get("/api/docs/openapi.json");
+      expect(res.status).toBe(200);
+      expect(res.body.openapi).toBe("3.0.3");
+      expect(res.body.info.title).toBe("Atlas County Scraper API");
+      expect(res.body.paths["/api/v1/leads"]).toBeDefined();
+      expect(res.body.components.securitySchemes.ApiKeyAuth).toBeDefined();
+    });
+
+    it("GET /api/docs serves Swagger UI", async () => {
+      const res = await request(app).get("/api/docs/");
+      expect(res.status).toBe(200);
+      expect(res.text).toContain("swagger-ui");
+    });
+  });
 });

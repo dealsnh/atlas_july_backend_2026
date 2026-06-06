@@ -22,6 +22,7 @@ describe("health routes", () => {
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.data.name).toBe("Atlas County Scraper API");
+    expect(response.body.data.docs).toBe("/api/docs");
   });
 
   it("returns health status", async () => {
