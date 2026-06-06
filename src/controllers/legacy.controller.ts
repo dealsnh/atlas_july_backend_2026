@@ -168,7 +168,8 @@ export async function legacyImport(req: Request, res: Response): Promise<void> {
 }
 
 export async function legacySeed(_req: Request, res: Response): Promise<void> {
-  res.json(await seedDemoLeads());
+  const result = await seedDemoLeads();
+  res.json({ ok: true, ...result });
 }
 
 export async function legacyDeleteLeads(req: Request, res: Response): Promise<void> {
