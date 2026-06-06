@@ -14,6 +14,41 @@ const leadFilters = [
 const authSecurity = [{ ApiKeyAuth: [] }, { BearerAuth: [] }];
 
 export const openApiPaths = {
+  "/": {
+    get: {
+      tags: ["Health"],
+      summary: "API root metadata",
+      operationId: "getRoot",
+      responses: {
+        "200": {
+          description: "API name, version, and documentation links",
+          content: {
+            "application/json": {
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                  {
+                    type: "object",
+                    properties: {
+                      data: {
+                        type: "object",
+                        properties: {
+                          name: { type: "string", example: "Atlas County Scraper API" },
+                          version: { type: "string", example: "1.0.0" },
+                          docs: { type: "string", example: "/api/docs" },
+                          openapi: { type: "string", example: "/api/docs/openapi.json" },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
+  },
   "/api/v1/health": {
     get: {
       tags: ["Health"],

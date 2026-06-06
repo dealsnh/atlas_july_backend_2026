@@ -1,4 +1,35 @@
+import {
+  BOOLEAN_STRING,
+  LEAD_STATUSES,
+  LEAD_TYPES,
+  SCRAPE_RUN_STATUSES,
+  US_STATE_CODES,
+} from "../../config/api-enums.js";
+
 export const openApiSchemas = {
+  LeadStatus: {
+    type: "string",
+    enum: [...LEAD_STATUSES],
+    description: "Lead workflow status",
+  },
+  LeadType: {
+    type: "string",
+    enum: [...LEAD_TYPES],
+    description: "Category of motivated seller lead",
+  },
+  UsStateCode: {
+    type: "string",
+    enum: [...US_STATE_CODES],
+    description: "US state code for scrape targets",
+  },
+  ScrapeRunStatus: {
+    type: "string",
+    enum: [...SCRAPE_RUN_STATUSES],
+  },
+  BooleanString: {
+    type: "string",
+    enum: [...BOOLEAN_STRING],
+  },
   ApiSuccessEnvelope: {
     type: "object",
     required: ["success", "data"],
@@ -30,8 +61,8 @@ export const openApiSchemas = {
     properties: {
       id: { type: "string", example: "MO-JACKSON-PREFC-001" },
       county: { type: "string", example: "Jackson" },
-      state: { type: "string", example: "MO" },
-      lead_type: { type: "string", example: "Pre-Foreclosure" },
+      state: { $ref: "#/components/schemas/UsStateCode" },
+      lead_type: { $ref: "#/components/schemas/LeadType" },
       owner_name: { type: "string", nullable: true },
       address: { type: "string", nullable: true },
       city: { type: "string", nullable: true },
@@ -51,7 +82,7 @@ export const openApiSchemas = {
       description: { type: "string", nullable: true },
       source_url: { type: "string", format: "uri", nullable: true },
       raw_data: { type: "string", nullable: true },
-      status: { type: "string", example: "new" },
+      status: { $ref: "#/components/schemas/LeadStatus" },
       notes: { type: "string", nullable: true },
       skip_traced: { oneOf: [{ type: "integer" }, { type: "boolean" }] },
       st_phone: { type: "string", nullable: true },
@@ -80,7 +111,7 @@ export const openApiSchemas = {
         items: {
           type: "object",
           properties: {
-            lead_type: { type: "string" },
+            lead_type: { $ref: "#/components/schemas/LeadType" },
             count: { type: "integer" },
           },
         },
@@ -110,7 +141,7 @@ export const openApiSchemas = {
           properties: {
             name: { type: "string" },
             county: { type: "string" },
-            state: { type: "string" },
+            state: { type: "string", enum: [...US_STATE_CODES] },
           },
         },
       },
@@ -127,7 +158,7 @@ export const openApiSchemas = {
       email_recipients: { type: "string", description: "Comma-separated emails" },
       scraper_api_key: { type: "string" },
       skip_trace_key: { type: "string" },
-      auto_skip_trace: { type: "string", enum: ["true", "false"] },
+      auto_skip_trace: { type: "string", enum: [...BOOLEAN_STRING] },
       bright_data_user: { type: "string" },
       bright_data_pass: { type: "string" },
       attom_api_key: { type: "string" },
@@ -150,7 +181,7 @@ export const openApiSchemas = {
       email_recipients: { type: "string" },
       scraper_api_key: { type: "string" },
       skip_trace_key: { type: "string" },
-      auto_skip_trace: { type: "string", enum: ["true", "false"] },
+      auto_skip_trace: { type: "string", enum: [...BOOLEAN_STRING] },
       bright_data_user: { type: "string" },
       bright_data_pass: { type: "string" },
       attom_api_key: { type: "string" },
@@ -172,7 +203,7 @@ export const openApiSchemas = {
       lead_type: { type: "string" },
       started_at: { type: "string", format: "date-time" },
       finished_at: { type: "string", format: "date-time", nullable: true },
-      status: { type: "string", enum: ["running", "success", "error"] },
+      status: { $ref: "#/components/schemas/ScrapeRunStatus" },
       leads_found: { type: "integer" },
       error: { type: "string", nullable: true },
     },
@@ -181,7 +212,7 @@ export const openApiSchemas = {
     type: "object",
     required: ["status"],
     properties: {
-      status: { type: "string", example: "reviewed" },
+      status: { $ref: "#/components/schemas/LeadStatus" },
       notes: { type: "string" },
     },
   },
@@ -239,13 +270,13 @@ export const openApiParameters = {
   LeadTypeQuery: {
     name: "lead_type",
     in: "query",
-    schema: { type: "string" },
-    description: "Filter by lead type (e.g. Pre-Foreclosure, Probate)",
+    schema: { $ref: "#/components/schemas/LeadType" },
+    description: "Filter by lead type",
   },
   StatusQuery: {
     name: "status",
     in: "query",
-    schema: { type: "string" },
+    schema: { $ref: "#/components/schemas/LeadStatus" },
     description: "Filter by lead status",
   },
   FromDateQuery: {

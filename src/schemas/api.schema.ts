@@ -1,9 +1,10 @@
 import { z } from "zod";
+import { BOOLEAN_STRING, LEAD_STATUSES, LEAD_TYPES } from "../config/api-enums.js";
 
 export const leadsQuerySchema = z.object({
   county: z.string().optional(),
-  lead_type: z.string().optional(),
-  status: z.string().optional(),
+  lead_type: z.enum(LEAD_TYPES).optional(),
+  status: z.enum(LEAD_STATUSES).optional(),
   from_date: z.string().optional(),
   to_date: z.string().optional(),
   limit: z.coerce.number().int().positive().max(5000).optional(),
@@ -11,7 +12,7 @@ export const leadsQuerySchema = z.object({
 });
 
 export const updateLeadSchema = z.object({
-  status: z.string().min(1),
+  status: z.enum(LEAD_STATUSES),
   notes: z.string().optional(),
 });
 
@@ -29,7 +30,7 @@ export const settingsSchema = z
     email_recipients: z.string().optional(),
     scraper_api_key: z.string().optional(),
     skip_trace_key: z.string().optional(),
-    auto_skip_trace: z.string().optional(),
+    auto_skip_trace: z.enum(BOOLEAN_STRING).optional(),
     bright_data_user: z.string().optional(),
     bright_data_pass: z.string().optional(),
     attom_api_key: z.string().optional(),
