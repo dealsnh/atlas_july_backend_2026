@@ -11,6 +11,11 @@ import { logger } from "./utils/logger.js";
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
+function getDisplayBaseUrl(): string {
+  const host = env.HOST === "0.0.0.0" || env.HOST === "::" ? "localhost" : env.HOST;
+  return `http://${host}:${env.PORT}`;
+}
+
 export async function startServer(): Promise<Server> {
   await initDb();
   await syncRuntimeConfig();
@@ -20,18 +25,35 @@ export async function startServer(): Promise<Server> {
 
   await new Promise<void>((resolve) => {
     server.listen(env.PORT, env.HOST, () => {
+      const baseUrl = getDisplayBaseUrl();
+      const counties =
+        clientConfig.counties.map((c) => `${c.name} ${c.state}`).join(", ") || "none";
+
       logger.info(
         {
           host: env.HOST,
           port: env.PORT,
           environment: env.NODE_ENV,
           client: clientConfig.name,
-          counties: clientConfig.counties.map((c) => `${c.name} ${c.state}`).join(", ") || "none",
+          counties,
           scraperApi: env.SCRAPER_API_KEY ? "configured" : "not set",
+          smtp: env.SMTP_HOST ? "configured" : "not set",
+          apiKey: env.API_KEY ? "configured" : "not set",
           database: env.DATABASE_URL.replace(/:[^:@/]+@/, ":****@"),
+          urls: {
+            server: baseUrl,
+            swagger: `${baseUrl}/api/docs`,
+            openapiJson: `${baseUrl}/api/docs/openapi.json`,
+            health: `${baseUrl}/api/v1/health`,
+            ready: `${baseUrl}/api/v1/ready`,
+            config: `${baseUrl}/api/v1/config`,
+            legacyApi: `${baseUrl}/api`,
+            v1Api: `${baseUrl}/api/v1`,
+          },
         },
-        "Atlas backend server started",
+        `Atlas backend server started — Swagger: ${baseUrl}/api/docs`,
       );
+
       startDailyCron();
       resolve();
     });
