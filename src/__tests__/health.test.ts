@@ -1,9 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
+import { closeDb, getDb, resetDbForTests } from "../db/connection.js";
 import { createApp } from "../app.js";
 
 describe("health routes", () => {
   const app = createApp();
+
+  beforeAll(() => {
+    process.env.NODE_ENV = "test";
+    resetDbForTests();
+    getDb();
+  });
+
+  afterAll(() => {
+    closeDb();
+  });
 
   it("returns root metadata", async () => {
     const response = await request(app).get("/");

@@ -25,6 +25,18 @@ export class ApiError extends Error {
     return new ApiError(StatusCodes.NOT_FOUND, message);
   }
 
+  static unauthorized(message = "Unauthorized"): ApiError {
+    return new ApiError(StatusCodes.UNAUTHORIZED, message);
+  }
+
+  static conflict(message: string): ApiError {
+    return new ApiError(StatusCodes.CONFLICT, message);
+  }
+
+  static notImplemented(message: string): ApiError {
+    return new ApiError(StatusCodes.NOT_IMPLEMENTED, message);
+  }
+
   static internal(message = "Internal server error"): ApiError {
     return new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, message, {
       isOperational: false,

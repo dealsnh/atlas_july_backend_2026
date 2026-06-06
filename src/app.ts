@@ -5,7 +5,6 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { API_PREFIX } from "./config/constants.js";
 import { env, isProduction } from "./config/env.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { requestIdMiddleware } from "./middleware/request-id.js";
@@ -71,12 +70,12 @@ export function createApp(): express.Application {
       data: {
         name: "Atlas County Scraper API",
         version: "1.0.0",
-        docs: `${API_PREFIX}/health`,
+        docs: "/api/v1/health",
       },
     });
   });
 
-  app.use(API_PREFIX, routes);
+  app.use(routes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
