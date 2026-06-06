@@ -11,33 +11,37 @@ import {
 import type { Lead, LeadFilters } from "../types/lead.js";
 import { leadsToCsv } from "./csv.service.js";
 
-export function listLeads(filters: LeadFilters): { leads: Lead[]; total: number } {
+export async function listLeads(
+  filters: LeadFilters,
+): Promise<{ leads: Lead[]; total: number }> {
   const { limit = 100, offset = 0, ...rest } = filters;
-  const total = countLeads(rest);
-  const leads = findLeads({ ...rest, limit, offset });
+  const total = await countLeads(rest);
+  const leads = await findLeads({ ...rest, limit, offset });
   return { leads, total };
 }
 
-export function exportLeadsCsv(filters: Omit<LeadFilters, "limit" | "offset">): string {
-  const leads = findLeads(filters);
+export async function exportLeadsCsv(
+  filters: Omit<LeadFilters, "limit" | "offset">,
+): Promise<string> {
+  const leads = await findLeads(filters);
   return leadsToCsv(leads as unknown as Array<Record<string, string | number | null | undefined>>);
 }
 
-export function patchLead(id: string, status: string, notes?: string): void {
-  updateLeadStatus(id, status, notes);
+export async function patchLead(id: string, status: string, notes?: string): Promise<void> {
+  await updateLeadStatus(id, status, notes);
 }
 
-export function importLeads(leads: Array<Record<string, string | null>>): {
+export async function importLeads(leads: Array<Record<string, string | null>>): Promise<{
   inserted: number;
   skipped: number;
   total: number;
-} {
+}> {
   let inserted = 0;
   let skipped = 0;
 
   for (const lead of leads) {
     try {
-      if (insertLeadIfNotExists(lead)) inserted++;
+      if (await insertLeadIfNotExists(lead)) inserted++;
       else skipped++;
     } catch {
       skipped++;
@@ -47,7 +51,7 @@ export function importLeads(leads: Array<Record<string, string | null>>): {
   return { inserted, skipped, total: leads.length };
 }
 
-export function seedDemoLeads(): { inserted: number; total: number } {
+export async function seedDemoLeads(): Promise<{ inserted: number; total: number }> {
   const today = new Date().toISOString().split("T")[0] ?? null;
   const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString().split("T")[0] ?? null;
 
@@ -131,30 +135,30 @@ export function seedDemoLeads(): { inserted: number; total: number } {
 
   let inserted = 0;
   for (const lead of seedLeads) {
-    if (insertLeadIfNotExists(lead)) inserted++;
+    if (await insertLeadIfNotExists(lead)) inserted++;
   }
 
   return { inserted, total: seedLeads.length };
 }
 
-export function purgeLeads(filter: {
+export async function purgeLeads(filter: {
   county?: string;
   source_url?: string;
   owner_name_contains?: string;
-}): number {
+}): Promise<number> {
   return deleteLeadsByFilter(filter);
 }
 
-export function getStatsWithLastScrape(lastScrapeTime: string | null) {
-  return { ...getLeadStats(), lastScrapeTime };
+export async function getStatsWithLastScrape(lastScrapeTime: string | null) {
+  return { ...(await getLeadStats()), lastScrapeTime };
 }
 
-export function skipTraceLead(id: string): never {
-  const lead = findLeadById(id);
+export async function skipTraceLead(id: string): Promise<never> {
+  const lead = await findLeadById(id);
   if (!lead) {
     throw new Error("Lead not found");
   }
-  updateLeadSkipTrace(id, {});
+  await updateLeadSkipTrace(id, {});
   throw new Error("NOT_IMPLEMENTED");
 }
 

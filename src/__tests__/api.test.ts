@@ -1,17 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
-import { closeDb, getDb, resetDbForTests } from "../db/connection.js";
+import { closeDb, initDb, resetDbForTests } from "../db/connection.js";
 import { createApp } from "../app.js";
 import { insertLeadIfNotExists } from "../repositories/leads.repository.js";
 
 describe("API routes", () => {
   const app = createApp();
 
-  beforeAll(() => {
+  beforeAll(async () => {
     process.env.NODE_ENV = "test";
-    resetDbForTests();
-    getDb();
-    insertLeadIfNotExists({
+    await resetDbForTests();
+    await initDb();
+    await insertLeadIfNotExists({
       id: "test-lead-001",
       county: "Jackson",
       state: "MO",
@@ -25,8 +25,8 @@ describe("API routes", () => {
     });
   });
 
-  afterAll(() => {
-    closeDb();
+  afterAll(async () => {
+    await closeDb();
   });
 
   describe("v1 API", () => {

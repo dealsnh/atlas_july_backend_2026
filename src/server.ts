@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
 import { clientConfig } from "./config/constants.js";
 import { env } from "./config/env.js";
-import { getDb } from "./db/connection.js";
+import { closeDb, initDb } from "./db/connection.js";
 import { startDailyCron } from "./services/scrape.service.js";
 import { syncRuntimeConfig } from "./services/settings.service.js";
 import { logger } from "./utils/logger.js";
@@ -12,8 +12,8 @@ import { logger } from "./utils/logger.js";
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 export async function startServer(): Promise<Server> {
-  getDb();
-  syncRuntimeConfig();
+  await initDb();
+  await syncRuntimeConfig();
 
   const app = createApp();
   const server = createServer(app);
@@ -28,6 +28,7 @@ export async function startServer(): Promise<Server> {
           client: clientConfig.name,
           counties: clientConfig.counties.map((c) => `${c.name} ${c.state}`).join(", ") || "none",
           scraperApi: env.SCRAPER_API_KEY ? "configured" : "not set",
+          database: env.DATABASE_URL.replace(/:[^:@/]+@/, ":****@"),
         },
         "Atlas backend server started",
       );
@@ -44,7 +45,7 @@ export async function startServer(): Promise<Server> {
       process.exit(1);
     }, SHUTDOWN_TIMEOUT_MS);
 
-    server.close((error) => {
+    server.close(async (error) => {
       clearTimeout(forceExitTimer);
 
       if (error) {
@@ -52,6 +53,7 @@ export async function startServer(): Promise<Server> {
         process.exit(1);
       }
 
+      await closeDb();
       logger.info("Server closed gracefully");
       process.exit(0);
     });

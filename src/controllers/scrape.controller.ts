@@ -12,8 +12,8 @@ export function getScrapeStatusHandler(_req: Request, res: Response): void {
   res.json({ success: true, data: getScrapeStatus() });
 }
 
-export function getScrapeRunsHandler(_req: Request, res: Response): void {
-  res.json({ success: true, data: { runs: getScrapeRuns(200) } });
+export async function getScrapeRunsHandler(_req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: { runs: await getScrapeRuns(200) } });
 }
 
 export function triggerScrapeHandler(req: Request, res: Response): void {

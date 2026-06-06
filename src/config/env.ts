@@ -9,7 +9,12 @@ const envSchema = z.object({
   CLIENT_NAME: z.string().default("Atlas"),
   CLIENT_EMAIL: z.string().default(""),
   CLIENT_COUNTIES: z.string().default("[]"),
-  RAILWAY_VOLUME_MOUNT_PATH: z.string().optional(),
+  DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+  DATABASE_SSL: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+  DATABASE_POOL_SIZE: z.coerce.number().int().positive().default(10),
   SCRAPER_API_KEY: z.string().optional(),
   BRIGHT_DATA_USER: z.string().optional(),
   BRIGHT_DATA_PASS: z.string().optional(),

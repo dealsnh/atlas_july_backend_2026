@@ -4,8 +4,8 @@ import type { AppSettings } from "../types/settings.js";
 import { SECRET_MASK, SETTINGS_KEYS } from "../types/settings.js";
 import { logger } from "../utils/logger.js";
 
-export function syncRuntimeConfig(): void {
-  const settings = getSettings();
+export async function syncRuntimeConfig(): Promise<void> {
+  const settings = await getSettings();
   if (settings.scraper_api_key) process.env.SCRAPER_API_KEY = settings.scraper_api_key;
   if (settings.bright_data_user) process.env.BRIGHT_DATA_USER = settings.bright_data_user;
   if (settings.bright_data_pass) process.env.BRIGHT_DATA_PASS = settings.bright_data_pass;
@@ -13,8 +13,8 @@ export function syncRuntimeConfig(): void {
   logger.debug("Runtime scraper config synced from settings");
 }
 
-export function getMaskedSettings() {
-  const s = getSettings();
+export async function getMaskedSettings() {
+  const s = await getSettings();
   const isPlaceholder = (v: string) => !v || v.startsWith("placeholder");
 
   return {
@@ -38,7 +38,7 @@ export function getMaskedSettings() {
   };
 }
 
-export function updateSettings(body: Record<string, unknown>): void {
+export async function updateSettings(body: Record<string, unknown>): Promise<void> {
   const partial: Partial<AppSettings> = {};
 
   for (const key of SETTINGS_KEYS) {
@@ -47,16 +47,16 @@ export function updateSettings(body: Record<string, unknown>): void {
     }
   }
 
-  saveSettings(partial);
-  syncRuntimeConfig();
+  await saveSettings(partial);
+  await syncRuntimeConfig();
 }
 
-export function getRawSettings(): AppSettings {
+export async function getRawSettings(): Promise<AppSettings> {
   return getSettings();
 }
 
-export function getEmailRecipients(): string[] {
-  const settings = getSettings();
+export async function getEmailRecipients(): Promise<string[]> {
+  const settings = await getSettings();
   const fromSettings = settings.email_recipients
     ? settings.email_recipients.split(",").map((e) => e.trim()).filter(Boolean)
     : [];

@@ -29,21 +29,26 @@ let scrapeInProgress = false;
 let lastScrapeLog: string[] = [];
 let lastScrapeTime: string | null = null;
 let lastScrapeTimeLoaded = false;
+let lastScrapeTimeLoadPromise: Promise<void> | null = null;
 
-function loadLastScrapeTime(): string | null {
-  if (!lastScrapeTimeLoaded) {
-    lastScrapeTime = getLastScrapeTime();
-    lastScrapeTimeLoaded = true;
+async function ensureLastScrapeTimeLoaded(): Promise<void> {
+  if (lastScrapeTimeLoaded) return;
+  if (!lastScrapeTimeLoadPromise) {
+    lastScrapeTimeLoadPromise = getLastScrapeTime().then((t) => {
+      lastScrapeTime = t;
+      lastScrapeTimeLoaded = true;
+    });
   }
-  return lastScrapeTime;
+  await lastScrapeTimeLoadPromise;
 }
 
 export function getScrapeStatus() {
   return { in_progress: scrapeInProgress, log: lastScrapeLog };
 }
 
-export function getLastScrapeTimeValue(): string | null {
-  return loadLastScrapeTime();
+export async function getLastScrapeTimeValue(): Promise<string | null> {
+  await ensureLastScrapeTimeLoaded();
+  return lastScrapeTime;
 }
 
 function buildCountyConfigs(): CountyConfig[] {
@@ -62,7 +67,7 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
   scrapeInProgress = true;
   lastScrapeLog = [];
   let totalNew = 0;
-  const runId = logScrapeRun(fromDate, toDate);
+  const runId = await logScrapeRun(fromDate, toDate);
 
   try {
     const counties = buildCountyConfigs();
@@ -72,7 +77,7 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
     });
 
     for (const lead of leads) {
-      const isNew = insertLeadIfNotExists(lead as unknown as Record<string, string | null>);
+      const isNew = await insertLeadIfNotExists(lead as unknown as Record<string, string | null>);
       if (isNew) totalNew++;
     }
 
@@ -82,13 +87,13 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
     lastScrapeLog.push(`✓ Done: ${totalNew} new leads saved`);
 
     lastScrapeTime = new Date().toISOString();
-    setLastScrapeTime(lastScrapeTime);
+    await setLastScrapeTime(lastScrapeTime);
     lastScrapeTimeLoaded = true;
-    finishScrapeRun(runId, totalNew);
+    await finishScrapeRun(runId, totalNew);
     logger.info({ totalNew }, "Scrape complete");
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    finishScrapeRun(runId, totalNew, errMsg);
+    await finishScrapeRun(runId, totalNew, errMsg);
     throw error;
   } finally {
     scrapeInProgress = false;
@@ -112,11 +117,11 @@ export function startDailyCron(): void {
 
       try {
         const newLeads = await runScrapeJob(fromDate, toDate);
-        const settings = getRawSettings();
-        const recipients = getEmailRecipients();
+        const settings = await getRawSettings();
+        const recipients = await getEmailRecipients();
 
         if (recipients.length > 0 && newLeads > 0 && isSmtpReady(settings)) {
-          const allLeads = findLeads({ from_date: toDate, to_date: toDate });
+          const allLeads = await findLeads({ from_date: toDate, to_date: toDate });
           for (const recipient of recipients) {
             await sendDailyReport(
               recipient,

@@ -14,8 +14,8 @@ export function getHealth(_req: Request, res: Response): void {
   });
 }
 
-export function getReady(_req: Request, res: Response): void {
-  const dbReady = isDbReady();
+export async function getReady(_req: Request, res: Response): Promise<void> {
+  const dbReady = await isDbReady();
   res.status(dbReady ? 200 : 503).json({
     success: dbReady,
     data: {

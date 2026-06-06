@@ -1,5 +1,5 @@
-import { getDb } from "../db/connection.js";
 import { normalizeCounty, normalizeLeadType } from "../db/schema.js";
+import { execute, query, queryOne } from "../db/query.js";
 import type { Lead, LeadFilters, LeadStats } from "../types/lead.js";
 
 const LEAD_FIELDS = [
@@ -28,13 +28,16 @@ const LEAD_FIELDS = [
   "raw_data",
 ] as const;
 
-export function insertLeadIfNotExists(lead: Record<string, string | null>): boolean {
+export async function insertLeadIfNotExists(
+  lead: Record<string, string | null>,
+): Promise<boolean> {
   const addr = (lead.address || "").trim();
   const name = (lead.owner_name || "").trim();
   if ((!addr || addr.length < 5) && (!name || name.length < 2)) return false;
 
-  const db = getDb();
-  const existing = db.prepare("SELECT id FROM leads WHERE id = ?").get(lead.id);
+  const existing = await queryOne<{ id: string }>("SELECT id FROM leads WHERE id = $1", [
+    lead.id,
+  ]);
   if (existing) return false;
 
   const normalized: Record<string, string | null> = { ...lead };
@@ -51,7 +54,8 @@ export function insertLeadIfNotExists(lead: Record<string, string | null>): bool
       ? lead.scraped_at
       : null;
 
-  db.prepare(`
+  const inserted = await execute(
+    `
     INSERT INTO leads (
       id, county, state, lead_type, owner_name, address, city, zip,
       mailing_address, mailing_city, mailing_state, mailing_zip,
@@ -59,155 +63,175 @@ export function insertLeadIfNotExists(lead: Record<string, string | null>): bool
       loan_amount, sale_date, sale_amount, description, source_url, raw_data,
       scraped_at
     ) VALUES (
-      @id, @county, @state, @lead_type, @owner_name, @address, @city, @zip,
-      @mailing_address, @mailing_city, @mailing_state, @mailing_zip,
-      @case_number, @filing_date, @assessed_value, @tax_year, @lender,
-      @loan_amount, @sale_date, @sale_amount, @description, @source_url, @raw_data,
-      COALESCE(@scraped_at, datetime('now'))
+      $1, $2, $3, $4, $5, $6, $7, $8,
+      $9, $10, $11, $12,
+      $13, $14, $15, $16, $17,
+      $18, $19, $20, $21, $22, $23,
+      COALESCE($24::timestamptz, NOW())
     )
-  `).run({ ...safeLead, scraped_at: scrapedAt });
+    ON CONFLICT (id) DO NOTHING
+  `,
+    [
+      safeLead.id,
+      safeLead.county,
+      safeLead.state,
+      safeLead.lead_type,
+      safeLead.owner_name,
+      safeLead.address,
+      safeLead.city,
+      safeLead.zip,
+      safeLead.mailing_address,
+      safeLead.mailing_city,
+      safeLead.mailing_state,
+      safeLead.mailing_zip,
+      safeLead.case_number,
+      safeLead.filing_date,
+      safeLead.assessed_value,
+      safeLead.tax_year,
+      safeLead.lender,
+      safeLead.loan_amount,
+      safeLead.sale_date,
+      safeLead.sale_amount,
+      safeLead.description,
+      safeLead.source_url,
+      safeLead.raw_data,
+      scrapedAt,
+    ],
+  );
 
-  return true;
+  return inserted > 0;
 }
 
-export function countLeads(filters: Omit<LeadFilters, "limit" | "offset">): number {
-  const db = getDb();
-  let query = "SELECT COUNT(*) as c FROM leads WHERE 1=1";
-  const params: Record<string, string> = {};
+function buildFilterClause(
+  filters: Omit<LeadFilters, "limit" | "offset">,
+  startIndex = 1,
+): { clause: string; params: unknown[] } {
+  const params: unknown[] = [];
+  let clause = "";
+  let i = startIndex;
 
   if (filters.county) {
-    query += " AND county = @county";
-    params.county = filters.county;
+    clause += ` AND county = $${i++}`;
+    params.push(filters.county);
   }
   if (filters.lead_type) {
-    query += " AND lead_type = @lead_type";
-    params.lead_type = filters.lead_type;
+    clause += ` AND lead_type = $${i++}`;
+    params.push(filters.lead_type);
   }
   if (filters.status) {
-    query += " AND status = @status";
-    params.status = filters.status;
+    clause += ` AND status = $${i++}`;
+    params.push(filters.status);
   }
   if (filters.from_date) {
-    query += " AND filing_date >= @from_date";
-    params.from_date = filters.from_date;
+    clause += ` AND filing_date >= $${i++}`;
+    params.push(filters.from_date);
   }
   if (filters.to_date) {
-    query += " AND filing_date <= @to_date";
-    params.to_date = filters.to_date;
+    clause += ` AND filing_date <= $${i++}`;
+    params.push(filters.to_date);
   }
 
-  const row = db.prepare(query).get(params) as { c: number };
-  return row.c;
+  return { clause, params };
 }
 
-export function findLeads(filters: LeadFilters): Lead[] {
-  const db = getDb();
-  let query = "SELECT * FROM leads WHERE 1=1";
-  const params: Record<string, string | number> = {};
+export async function countLeads(filters: Omit<LeadFilters, "limit" | "offset">): Promise<number> {
+  const { clause, params } = buildFilterClause(filters);
+  const row = await queryOne<{ c: string }>(
+    `SELECT COUNT(*)::int AS c FROM leads WHERE 1=1${clause}`,
+    params,
+  );
+  return Number(row?.c ?? 0);
+}
 
-  if (filters.county) {
-    query += " AND county = @county";
-    params.county = filters.county;
-  }
-  if (filters.lead_type) {
-    query += " AND lead_type = @lead_type";
-    params.lead_type = filters.lead_type;
-  }
-  if (filters.status) {
-    query += " AND status = @status";
-    params.status = filters.status;
-  }
-  if (filters.from_date) {
-    query += " AND filing_date >= @from_date";
-    params.from_date = filters.from_date;
-  }
-  if (filters.to_date) {
-    query += " AND filing_date <= @to_date";
-    params.to_date = filters.to_date;
-  }
-
-  query += " ORDER BY filing_date DESC, scraped_at DESC";
+export async function findLeads(filters: LeadFilters): Promise<Lead[]> {
+  const { clause, params } = buildFilterClause(filters);
+  let sql = `SELECT * FROM leads WHERE 1=1${clause} ORDER BY filing_date DESC NULLS LAST, scraped_at DESC`;
+  const allParams = [...params];
 
   if (filters.limit !== undefined) {
-    query += " LIMIT @limit OFFSET @offset";
-    params.limit = filters.limit;
-    params.offset = filters.offset ?? 0;
+    sql += ` LIMIT $${allParams.length + 1} OFFSET $${allParams.length + 2}`;
+    allParams.push(filters.limit, filters.offset ?? 0);
   }
 
-  return db.prepare(query).all(params) as Lead[];
+  return query<Lead>(sql, allParams);
 }
 
-export function updateLeadStatus(id: string, status: string, notes?: string): void {
-  getDb()
-    .prepare("UPDATE leads SET status = ?, notes = ?, updated_at = datetime('now') WHERE id = ?")
-    .run(status, notes ?? null, id);
+export async function updateLeadStatus(id: string, status: string, notes?: string): Promise<void> {
+  await execute(
+    "UPDATE leads SET status = $1, notes = $2, updated_at = NOW() WHERE id = $3",
+    [status, notes ?? null, id],
+  );
 }
 
-export function updateLeadSkipTrace(
+export async function updateLeadSkipTrace(
   id: string,
   data: { phone?: string; email?: string; mailing?: string },
-): void {
-  getDb()
-    .prepare(`
+): Promise<void> {
+  await execute(
+    `
     UPDATE leads SET
-      skip_traced = 1,
-      st_phone    = COALESCE(?, st_phone),
-      st_email    = COALESCE(?, st_email),
-      st_mailing  = COALESCE(?, st_mailing),
-      updated_at  = datetime('now')
-    WHERE id = ?
-  `)
-    .run(data.phone ?? null, data.email ?? null, data.mailing ?? null, id);
+      skip_traced = TRUE,
+      st_phone    = COALESCE($1, st_phone),
+      st_email    = COALESCE($2, st_email),
+      st_mailing  = COALESCE($3, st_mailing),
+      updated_at  = NOW()
+    WHERE id = $4
+  `,
+    [data.phone ?? null, data.email ?? null, data.mailing ?? null, id],
+  );
 }
 
-export function findLeadById(id: string): Lead | undefined {
-  return getDb().prepare("SELECT * FROM leads WHERE id = ?").get(id) as Lead | undefined;
+export async function findLeadById(id: string): Promise<Lead | undefined> {
+  return queryOne<Lead>("SELECT * FROM leads WHERE id = $1", [id]);
 }
 
-export function getLeadStats(): LeadStats {
-  const db = getDb();
-  const total = (db.prepare("SELECT COUNT(*) as c FROM leads").get() as { c: number }).c;
-  const byType = db
-    .prepare(
-      "SELECT lead_type, COUNT(*) as count FROM leads GROUP BY lead_type ORDER BY count DESC",
-    )
-    .all() as Array<{ lead_type: string; count: number }>;
-  const byCounty = db
-    .prepare("SELECT county, COUNT(*) as count FROM leads GROUP BY county ORDER BY count DESC")
-    .all() as Array<{ county: string; count: number }>;
-  const today = db
-    .prepare(
-      "SELECT COUNT(*) as c FROM leads WHERE date(scraped_at, '-5 hours') = date('now', '-5 hours')",
-    )
-    .get() as { c: number };
-  const lastRun = db
-    .prepare("SELECT MAX(finished_at) as t FROM scrape_runs WHERE status = 'success'")
-    .get() as { t: string | null };
+export async function getLeadStats(): Promise<LeadStats> {
+  const totalRow = await queryOne<{ c: string }>("SELECT COUNT(*)::int AS c FROM leads");
+  const byType = await query<{ lead_type: string; count: number }>(
+    "SELECT lead_type, COUNT(*)::int AS count FROM leads GROUP BY lead_type ORDER BY count DESC",
+  );
+  const byCounty = await query<{ county: string; count: number }>(
+    "SELECT county, COUNT(*)::int AS count FROM leads GROUP BY county ORDER BY count DESC",
+  );
+  const todayRow = await queryOne<{ c: string }>(
+    `SELECT COUNT(*)::int AS c FROM leads
+     WHERE (scraped_at AT TIME ZONE 'America/New_York')::date
+       = (NOW() AT TIME ZONE 'America/New_York')::date`,
+  );
+  const lastRunRow = await queryOne<{ t: string | null }>(
+    "SELECT MAX(finished_at) AS t FROM scrape_runs WHERE status = 'success'",
+  );
 
-  return { total, byType, byCounty, today: today.c, lastRun: lastRun?.t ?? null };
+  return {
+    total: Number(totalRow?.c ?? 0),
+    byType,
+    byCounty,
+    today: Number(todayRow?.c ?? 0),
+    lastRun: lastRunRow?.t ?? null,
+  };
 }
 
-export function deleteLeadsByFilter(filter: {
+export async function deleteLeadsByFilter(filter: {
   county?: string;
   source_url?: string;
   owner_name_contains?: string;
-}): number {
-  const db = getDb();
+}): Promise<number> {
   let sql = "DELETE FROM leads WHERE 1=1";
-  const params: string[] = [];
+  const params: unknown[] = [];
+  let i = 1;
 
   if (filter.county) {
-    sql += " AND LOWER(county) = LOWER(?)";
+    sql += ` AND LOWER(county) = LOWER($${i++})`;
     params.push(filter.county);
   }
   if (filter.source_url) {
-    sql += " AND source_url = ?";
+    sql += ` AND source_url = $${i++}`;
     params.push(filter.source_url);
   }
   if (filter.owner_name_contains) {
-    sql += " AND owner_name LIKE ?";
+    sql += ` AND owner_name ILIKE $${i++}`;
     params.push(`%${filter.owner_name_contains}%`);
   }
 
-  return db.prepare(sql).run(...params).changes;
+  return execute(sql, params);
 }

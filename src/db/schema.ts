@@ -1,37 +1,37 @@
 export const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS leads (
-    id            TEXT PRIMARY KEY,
-    county        TEXT NOT NULL,
-    state         TEXT NOT NULL,
-    lead_type     TEXT NOT NULL,
-    owner_name    TEXT,
-    address       TEXT,
-    city          TEXT,
-    zip           TEXT,
+    id              TEXT PRIMARY KEY,
+    county          TEXT NOT NULL,
+    state           TEXT NOT NULL,
+    lead_type       TEXT NOT NULL,
+    owner_name      TEXT,
+    address         TEXT,
+    city            TEXT,
+    zip             TEXT,
     mailing_address TEXT,
-    mailing_city  TEXT,
-    mailing_state TEXT,
-    mailing_zip   TEXT,
-    case_number   TEXT,
-    filing_date   TEXT,
-    assessed_value TEXT,
-    tax_year      TEXT,
-    lender        TEXT,
-    loan_amount   TEXT,
-    sale_date     TEXT,
-    sale_amount   TEXT,
-    description   TEXT,
-    source_url    TEXT,
-    raw_data      TEXT,
-    status        TEXT NOT NULL DEFAULT 'new',
-    notes         TEXT,
-    skip_traced   INTEGER NOT NULL DEFAULT 0,
-    st_phone      TEXT,
-    st_email      TEXT,
-    st_mailing    TEXT,
-    scraped_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    mailing_city    TEXT,
+    mailing_state   TEXT,
+    mailing_zip     TEXT,
+    case_number     TEXT,
+    filing_date     TEXT,
+    assessed_value  TEXT,
+    tax_year        TEXT,
+    lender          TEXT,
+    loan_amount     TEXT,
+    sale_date       TEXT,
+    sale_amount     TEXT,
+    description     TEXT,
+    source_url      TEXT,
+    raw_data        TEXT,
+    status          TEXT NOT NULL DEFAULT 'new',
+    notes           TEXT,
+    skip_traced     BOOLEAN NOT NULL DEFAULT FALSE,
+    st_phone        TEXT,
+    st_email        TEXT,
+    st_mailing      TEXT,
+    scraped_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
   CREATE INDEX IF NOT EXISTS idx_leads_county ON leads(county);
@@ -41,12 +41,12 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_leads_scraped_at ON leads(scraped_at);
 
   CREATE TABLE IF NOT EXISTS scrape_runs (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    id          SERIAL PRIMARY KEY,
     county      TEXT NOT NULL,
     state       TEXT NOT NULL,
     lead_type   TEXT NOT NULL,
-    started_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    finished_at TEXT,
+    started_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ,
     status      TEXT NOT NULL DEFAULT 'running',
     leads_found INTEGER DEFAULT 0,
     error       TEXT
@@ -58,12 +58,11 @@ export const SCHEMA_SQL = `
   );
 `;
 
-export const MIGRATIONS = [
-  "ALTER TABLE leads ADD COLUMN skip_traced INTEGER NOT NULL DEFAULT 0",
-  "ALTER TABLE leads ADD COLUMN st_phone TEXT",
-  "ALTER TABLE leads ADD COLUMN st_email TEXT",
-  "ALTER TABLE leads ADD COLUMN st_mailing TEXT",
-];
+export const CLEANUP_JUNK_LEADS_SQL = `
+  DELETE FROM leads
+  WHERE (address IS NULL OR trim(address) = '' OR length(trim(address)) < 5)
+    AND (owner_name IS NULL OR trim(owner_name) = '' OR length(trim(owner_name)) < 2)
+`;
 
 export const LEAD_TYPE_MAP: Record<string, string> = {
   CV: "Code Violation",

@@ -27,45 +27,45 @@ import {
   updateSettings,
 } from "../services/settings.service.js";
 
-export function legacyListLeads(req: Request, res: Response): void {
-  const result = listLeads(req.query as Parameters<typeof listLeads>[0]);
+export async function legacyListLeads(req: Request, res: Response): Promise<void> {
+  const result = await listLeads(req.query as Parameters<typeof listLeads>[0]);
   res.json(result);
 }
 
-export function legacyExportLeads(req: Request, res: Response): void {
-  const csv = exportLeadsCsv(req.query as Parameters<typeof exportLeadsCsv>[0]);
+export async function legacyExportLeads(req: Request, res: Response): Promise<void> {
+  const csv = await exportLeadsCsv(req.query as Parameters<typeof exportLeadsCsv>[0]);
   const date = new Date().toISOString().split("T")[0];
   res.setHeader("Content-Type", "text/csv");
   res.setHeader("Content-Disposition", `attachment; filename="atlas-leads-${date}.csv"`);
   res.send(csv);
 }
 
-export function legacyUpdateLead(req: Request, res: Response): void {
+export async function legacyUpdateLead(req: Request, res: Response): Promise<void> {
   const id = req.params.id as string;
   const { status, notes } = req.body as { status: string; notes?: string };
-  patchLead(id, status, notes);
+  await patchLead(id, status, notes);
   res.json({ ok: true });
 }
 
-export function legacyStats(_req: Request, res: Response): void {
-  res.json({ ...getLeadStats(), lastScrapeTime: getLastScrapeTimeValue() });
+export async function legacyStats(_req: Request, res: Response): Promise<void> {
+  res.json({ ...(await getLeadStats()), lastScrapeTime: await getLastScrapeTimeValue() });
 }
 
 export function legacyConfig(_req: Request, res: Response): void {
   res.json({ name: clientConfig.name, counties: clientConfig.counties });
 }
 
-export function legacyGetSettings(_req: Request, res: Response): void {
-  res.json(getMaskedSettings());
+export async function legacyGetSettings(_req: Request, res: Response): Promise<void> {
+  res.json(await getMaskedSettings());
 }
 
-export function legacySaveSettings(req: Request, res: Response): void {
-  updateSettings(req.body as Record<string, unknown>);
+export async function legacySaveSettings(req: Request, res: Response): Promise<void> {
+  await updateSettings(req.body as Record<string, unknown>);
   res.json({ ok: true });
 }
 
 export async function legacyTestEmail(req: Request, res: Response): Promise<void> {
-  const settings = getRawSettings();
+  const settings = await getRawSettings();
   const testRecipient =
     (req.body as { email?: string }).email ||
     settings.email_recipients?.split(",")[0]?.trim();
@@ -101,7 +101,7 @@ export async function legacyTestEmail(req: Request, res: Response): Promise<void
 }
 
 export async function legacySkipTrace(req: Request, res: Response): Promise<void> {
-  const settings = getRawSettings();
+  const settings = await getRawSettings();
   if (!settings.skip_trace_key) {
     res.status(400).json({
       success: false,
@@ -133,8 +133,8 @@ export function legacyScrapeStatus(_req: Request, res: Response): void {
   res.json(getScrapeStatus());
 }
 
-export function legacyScrapeRuns(_req: Request, res: Response): void {
-  res.json({ runs: getScrapeRuns(200) });
+export async function legacyScrapeRuns(_req: Request, res: Response): Promise<void> {
+  res.json({ runs: await getScrapeRuns(200) });
 }
 
 export function legacyHistoricalScrape(req: Request, res: Response): void {
@@ -144,7 +144,10 @@ export function legacyHistoricalScrape(req: Request, res: Response): void {
     return;
   }
 
-  const daysBack = Math.min(parseInt(String((req.body as { days_back?: number }).days_back ?? 30), 10), 90);
+  const daysBack = Math.min(
+    parseInt(String((req.body as { days_back?: number }).days_back ?? 30), 10),
+    90,
+  );
   const { fromDate, toDate } = getDateRange(daysBack);
   startScrapeJob(fromDate, toDate);
   res.json({
@@ -155,20 +158,20 @@ export function legacyHistoricalScrape(req: Request, res: Response): void {
   });
 }
 
-export function legacyImport(req: Request, res: Response): void {
+export async function legacyImport(req: Request, res: Response): Promise<void> {
   if (!Array.isArray(req.body)) {
     res.status(400).json({ error: "Expected array of leads" });
     return;
   }
-  const result = importLeads(req.body as Array<Record<string, string | null>>);
+  const result = await importLeads(req.body as Array<Record<string, string | null>>);
   res.json({ ok: true, ...result });
 }
 
-export function legacySeed(_req: Request, res: Response): void {
-  res.json(seedDemoLeads());
+export async function legacySeed(_req: Request, res: Response): Promise<void> {
+  res.json(await seedDemoLeads());
 }
 
-export function legacyDeleteLeads(req: Request, res: Response): void {
+export async function legacyDeleteLeads(req: Request, res: Response): Promise<void> {
   const body = req.body as {
     county?: string;
     source_url?: string;
@@ -180,7 +183,7 @@ export function legacyDeleteLeads(req: Request, res: Response): void {
     });
     return;
   }
-  res.json({ ok: true, deleted: purgeLeads(body) });
+  res.json({ ok: true, deleted: await purgeLeads(body) });
 }
 
 export { scrapeStreamHandler as legacyScrapeStream } from "./scrape.controller.js";

@@ -8,17 +8,17 @@ import {
 } from "../services/settings.service.js";
 import { ApiError } from "../utils/api-error.js";
 
-export function getSettingsHandler(_req: Request, res: Response): void {
-  res.json({ success: true, data: getMaskedSettings() });
+export async function getSettingsHandler(_req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: await getMaskedSettings() });
 }
 
-export function saveSettingsHandler(req: Request, res: Response): void {
-  updateSettings(req.body as Record<string, unknown>);
+export async function saveSettingsHandler(req: Request, res: Response): Promise<void> {
+  await updateSettings(req.body as Record<string, unknown>);
   res.json({ success: true, data: { ok: true } });
 }
 
 export async function testEmailHandler(req: Request, res: Response): Promise<void> {
-  const settings = getRawSettings();
+  const settings = await getRawSettings();
   const testRecipient =
     (req.body as { email?: string }).email ||
     settings.email_recipients?.split(",")[0]?.trim();

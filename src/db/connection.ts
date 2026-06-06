@@ -1,70 +1,56 @@
-import Database from "better-sqlite3";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { env, isTest } from "../config/env.js";
+import pg from "pg";
+import { env } from "../config/env.js";
 import { logger } from "../utils/logger.js";
-import { MIGRATIONS, SCHEMA_SQL } from "./schema.js";
+import { CLEANUP_JUNK_LEADS_SQL, SCHEMA_SQL } from "./schema.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const { Pool } = pg;
 
-function resolveDbDir(): string {
-  if (isTest) {
-    return path.join(__dirname, "..", "..", "data-test");
+let pool: pg.Pool | null = null;
+
+export function getPool(): pg.Pool {
+  if (!pool) {
+    throw new Error("Database not initialized — call initDb() first");
   }
-  return env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, "..", "..", "data");
+  return pool;
 }
 
-let dbInstance: Database.Database | null = null;
+export async function initDb(): Promise<void> {
+  if (pool) return;
 
-export function getDb(): Database.Database {
-  if (dbInstance) return dbInstance;
+  pool = new Pool({
+    connectionString: env.DATABASE_URL,
+    ssl: env.DATABASE_SSL ? { rejectUnauthorized: false } : undefined,
+    max: env.DATABASE_POOL_SIZE,
+  });
 
-  const dbDir = resolveDbDir();
-  if (!fs.existsSync(dbDir)) {
-    fs.mkdirSync(dbDir, { recursive: true });
+  await pool.query(SCHEMA_SQL);
+
+  const cleanup = await pool.query(CLEANUP_JUNK_LEADS_SQL);
+  if (cleanup.rowCount && cleanup.rowCount > 0) {
+    logger.info({ deleted: cleanup.rowCount }, "Cleaned junk leads missing address and owner");
   }
 
-  const dbPath = path.join(dbDir, "atlas.db");
-  dbInstance = new Database(dbPath);
-
-  dbInstance.pragma("journal_mode = WAL");
-  dbInstance.pragma("foreign_keys = ON");
-  dbInstance.exec(SCHEMA_SQL);
-
-  for (const sql of MIGRATIONS) {
-    try {
-      dbInstance.exec(sql);
-    } catch {
-      // column already exists
-    }
-  }
-
-  logger.info({ dbPath }, "SQLite database initialized");
-  return dbInstance;
+  logger.info("PostgreSQL database initialized");
 }
 
-export function closeDb(): void {
-  if (dbInstance) {
-    dbInstance.close();
-    dbInstance = null;
+export async function closeDb(): Promise<void> {
+  if (pool) {
+    await pool.end();
+    pool = null;
   }
 }
 
-export function isDbReady(): boolean {
+export async function isDbReady(): Promise<boolean> {
   try {
-    getDb().prepare("SELECT 1").get();
+    if (!pool) return false;
+    await pool.query("SELECT 1");
     return true;
   } catch {
     return false;
   }
 }
 
-export function resetDbForTests(): void {
-  closeDb();
-  const dbDir = resolveDbDir();
-  const dbPath = path.join(dbDir, "atlas.db");
-  if (fs.existsSync(dbPath)) {
-    fs.unlinkSync(dbPath);
-  }
+export async function resetDbForTests(): Promise<void> {
+  await initDb();
+  await getPool().query("TRUNCATE TABLE leads, scrape_runs, settings RESTART IDENTITY CASCADE");
 }

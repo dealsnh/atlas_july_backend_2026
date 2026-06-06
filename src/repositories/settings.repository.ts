@@ -1,11 +1,11 @@
-import { getDb } from "../db/connection.js";
 import { env } from "../config/env.js";
+import { execute, query } from "../db/query.js";
 import type { AppSettings } from "../types/settings.js";
 
-export function getSettings(): AppSettings {
-  const rows = getDb()
-    .prepare("SELECT key, value FROM settings")
-    .all() as Array<{ key: string; value: string }>;
+export async function getSettings(): Promise<AppSettings> {
+  const rows = await query<{ key: string; value: string }>(
+    "SELECT key, value FROM settings",
+  );
   const stored: Record<string, string> = {};
   for (const row of rows) stored[row.key] = row.value;
 
@@ -25,13 +25,12 @@ export function getSettings(): AppSettings {
   };
 }
 
-export function saveSettings(partial: Partial<AppSettings>): void {
-  const db = getDb();
-  const upsert = db.prepare(
-    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-  );
-  const saveMany = db.transaction((entries: Array<[string, string]>) => {
-    for (const [key, value] of entries) upsert.run(key, value);
-  });
-  saveMany(Object.entries(partial) as Array<[string, string]>);
+export async function saveSettings(partial: Partial<AppSettings>): Promise<void> {
+  for (const [key, value] of Object.entries(partial) as Array<[string, string]>) {
+    await execute(
+      `INSERT INTO settings (key, value) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [key, value],
+    );
+  }
 }
