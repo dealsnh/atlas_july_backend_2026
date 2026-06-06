@@ -7,14 +7,15 @@ import {
   updateSettings,
 } from "../services/settings.service.js";
 import { ApiError } from "../utils/api-error.js";
+import { successResponse } from "../utils/api-response.js";
 
 export async function getSettingsHandler(_req: Request, res: Response): Promise<void> {
-  res.json({ success: true, data: await getMaskedSettings() });
+  successResponse(res, 200, undefined, await getMaskedSettings());
 }
 
 export async function saveSettingsHandler(req: Request, res: Response): Promise<void> {
   await updateSettings(req.body as Record<string, unknown>);
-  res.json({ success: true, data: { ok: true } });
+  successResponse(res, 200, undefined, { ok: true });
 }
 
 export async function testEmailHandler(req: Request, res: Response): Promise<void> {
@@ -45,15 +46,15 @@ export async function testEmailHandler(req: Request, res: Response): Promise<voi
     true,
   );
 
-  res.json({
-    success: true,
-    data: { ok: true, message: `Test email sent to ${testRecipient}` },
+  successResponse(res, 200, undefined, {
+    ok: true,
+    message: `Test email sent to ${testRecipient}`,
   });
 }
 
 export function getConfigHandler(_req: Request, res: Response): void {
-  res.json({
-    success: true,
-    data: { name: clientConfig.name, counties: clientConfig.counties },
+  successResponse(res, 200, undefined, {
+    name: clientConfig.name,
+    counties: clientConfig.counties,
   });
 }

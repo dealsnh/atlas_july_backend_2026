@@ -11,7 +11,9 @@ import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { requestIdMiddleware } from "./middleware/request-id.js";
 import docsRoutes from "./routes/docs.routes.js";
 import routes from "./routes/index.js";
+import { successResponse } from "./utils/api-response.js";
 import { logger } from "./utils/logger.js";
+import { createRateLimitHandler } from "./utils/api-response.js";
 
 function parseCorsOrigin(origin: string): boolean | string | string[] {
   if (origin === "*") return true;
@@ -72,22 +74,16 @@ export function createApp(): express.Application {
       max: isProduction ? 300 : 1000,
       standardHeaders: true,
       legacyHeaders: false,
-      message: {
-        success: false,
-        error: { message: "Too many requests, please try again later." },
-      },
+      handler: createRateLimitHandler("Too many requests, please try again later."),
     }),
   );
 
   app.get("/", (_req, res) => {
-    res.json({
-      success: true,
-      data: {
-        name: "Atlas County Scraper API",
-        version: "1.0.0",
-        docs: OPENAPI_DOCS_PATH,
-        openapi: "/api/docs/openapi.json",
-      },
+    successResponse(res, 200, undefined, {
+      name: "Atlas County Scraper API",
+      version: "1.0.0",
+      docs: OPENAPI_DOCS_PATH,
+      openapi: "/api/docs/openapi.json",
     });
   });
 

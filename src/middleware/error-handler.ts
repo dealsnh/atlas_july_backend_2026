@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { StatusCodes } from "http-status-codes";
 import { ApiError } from "../utils/api-error.js";
+import { errorResponse } from "../utils/api-response.js";
 
 export function notFoundHandler(_req: Request, _res: Response, next: NextFunction): void {
   next(ApiError.notFound("Route not found"));
@@ -15,13 +16,9 @@ export function errorHandler(
   const requestId = req.requestId;
 
   if (err instanceof ApiError) {
-    res.status(err.statusCode).json({
-      success: false,
-      error: {
-        message: err.message,
-        ...(err.details !== undefined ? { details: err.details } : {}),
-      },
+    errorResponse(res, err.statusCode, err.message, {
       requestId,
+      ...(err.details !== undefined ? { details: err.details } : {}),
     });
     return;
   }
@@ -29,20 +26,14 @@ export function errorHandler(
   const message = err instanceof Error ? err.message : "Internal server error";
 
   if (req.app.get("env") !== "production" && err instanceof Error) {
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-      success: false,
-      error: {
-        message,
-        stack: err.stack,
-      },
+    errorResponse(res, StatusCodes.INTERNAL_SERVER_ERROR, message, {
       requestId,
+      stack: err.stack,
     });
     return;
   }
 
-  res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-    success: false,
-    error: { message: "Internal server error" },
+  errorResponse(res, StatusCodes.INTERNAL_SERVER_ERROR, "Internal server error", {
     requestId,
   });
 }

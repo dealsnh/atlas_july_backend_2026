@@ -7,13 +7,14 @@ import {
   startScrapeJob,
 } from "../services/scrape.service.js";
 import { ApiError } from "../utils/api-error.js";
+import { successResponse } from "../utils/api-response.js";
 
 export function getScrapeStatusHandler(_req: Request, res: Response): void {
-  res.json({ success: true, data: getScrapeStatus() });
+  successResponse(res, 200, undefined, getScrapeStatus());
 }
 
 export async function getScrapeRunsHandler(_req: Request, res: Response): Promise<void> {
-  res.json({ success: true, data: { runs: await getScrapeRuns(200) } });
+  successResponse(res, 200, undefined, { runs: await getScrapeRuns(200) });
 }
 
 export function triggerScrapeHandler(req: Request, res: Response): void {
@@ -28,9 +29,11 @@ export function triggerScrapeHandler(req: Request, res: Response): void {
 
   startScrapeJob(fromDate, toDate);
 
-  res.json({
-    success: true,
-    data: { ok: true, message: "Scrape started", from_date: fromDate, to_date: toDate },
+  successResponse(res, 200, undefined, {
+    ok: true,
+    message: "Scrape started",
+    from_date: fromDate,
+    to_date: toDate,
   });
 }
 
@@ -45,14 +48,11 @@ export function triggerHistoricalScrapeHandler(req: Request, res: Response): voi
 
   startScrapeJob(fromDate, toDate);
 
-  res.json({
-    success: true,
-    data: {
-      ok: true,
-      message: `Historical scrape started (${daysBack} days)`,
-      from_date: fromDate,
-      to_date: toDate,
-    },
+  successResponse(res, 200, undefined, {
+    ok: true,
+    message: `Historical scrape started (${daysBack} days)`,
+    from_date: fromDate,
+    to_date: toDate,
   });
 }
 
