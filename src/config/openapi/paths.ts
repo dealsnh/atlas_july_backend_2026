@@ -2,6 +2,7 @@ import {
   openApiParameters,
   openApiResponses,
 } from "./schemas.js";
+import { optBody, reqBody } from "./helpers.js";
 
 const leadFilters = [
   openApiParameters.CountyQuery,
@@ -207,14 +208,11 @@ export const openApiPaths = {
       operationId: "updateLead",
       security: authSecurity,
       parameters: [openApiParameters.LeadIdParam],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: { $ref: "#/components/schemas/UpdateLeadBody" },
-          },
+      requestBody: reqBody({
+        "application/json": {
+          schema: { $ref: "#/components/schemas/UpdateLeadBody" },
         },
-      },
+      }),
       responses: {
         "200": {
           description: "Lead updated",
@@ -259,18 +257,15 @@ export const openApiPaths = {
       description: "Accepts an array of lead objects. Idempotent insert-if-not-exists.",
       operationId: "importLeads",
       security: authSecurity,
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "array",
-              minItems: 1,
-              items: { $ref: "#/components/schemas/Lead" },
-            },
+      requestBody: reqBody({
+        "application/json": {
+          schema: {
+            type: "array",
+            minItems: 1,
+            items: { $ref: "#/components/schemas/Lead" },
           },
         },
-      },
+      }),
       responses: {
         "200": {
           description: "Import summary",
@@ -385,14 +380,11 @@ export const openApiPaths = {
       description: "Partial update. Send `••••••••••••••••` to keep existing secret values unchanged.",
       operationId: "saveSettings",
       security: authSecurity,
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: { $ref: "#/components/schemas/SettingsUpdate" },
-          },
+      requestBody: reqBody({
+        "application/json": {
+          schema: { $ref: "#/components/schemas/SettingsUpdate" },
         },
-      },
+      }),
       responses: {
         "200": {
           description: "Settings saved",
@@ -421,13 +413,11 @@ export const openApiPaths = {
       summary: "Send test email",
       operationId: "testEmail",
       security: authSecurity,
-      requestBody: {
-        content: {
-          "application/json": {
-            schema: { $ref: "#/components/schemas/TestEmailBody" },
-          },
+      requestBody: optBody({
+        "application/json": {
+          schema: { $ref: "#/components/schemas/TestEmailBody" },
         },
-      },
+      }),
       responses: {
         "200": {
           description: "Test email sent",
@@ -465,13 +455,11 @@ export const openApiPaths = {
       description: "Starts an asynchronous scrape job. Returns immediately while scraping continues in background.",
       operationId: "triggerScrape",
       security: authSecurity,
-      requestBody: {
-        content: {
-          "application/json": {
-            schema: { $ref: "#/components/schemas/ScrapeTriggerBody" },
-          },
+      requestBody: optBody({
+        "application/json": {
+          schema: { $ref: "#/components/schemas/ScrapeTriggerBody" },
         },
-      },
+      }),
       responses: {
         "200": {
           description: "Scrape started",
@@ -593,13 +581,11 @@ export const openApiPaths = {
       description: "Scrapes the last N days (max 90). Runs asynchronously.",
       operationId: "triggerHistoricalScrape",
       security: authSecurity,
-      requestBody: {
-        content: {
-          "application/json": {
-            schema: { $ref: "#/components/schemas/HistoricalScrapeBody" },
-          },
+      requestBody: optBody({
+        "application/json": {
+          schema: { $ref: "#/components/schemas/HistoricalScrapeBody" },
         },
-      },
+      }),
       responses: {
         "200": {
           description: "Historical scrape started",
@@ -639,14 +625,11 @@ export const openApiPaths = {
       description: "Permanently deletes leads matching at least one filter. Requires authentication.",
       operationId: "deleteLeads",
       security: authSecurity,
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: { $ref: "#/components/schemas/AdminDeleteBody" },
-          },
+      requestBody: reqBody({
+        "application/json": {
+          schema: { $ref: "#/components/schemas/AdminDeleteBody" },
         },
-      },
+      }),
       responses: {
         "200": {
           description: "Leads deleted",

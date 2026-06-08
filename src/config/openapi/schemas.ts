@@ -5,6 +5,18 @@ import {
   SCRAPE_RUN_STATUSES,
   US_STATE_CODES,
 } from "../../config/api-enums.js";
+import { optParam, optProp, optProps, reqParam, reqProp } from "./helpers.js";
+
+function markedProps(
+  properties: Record<string, Record<string, unknown>>,
+  required: string[] = [],
+): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(
+    Object.entries(properties).map(([key, schema]) =>
+      required.includes(key) ? reqProp(key, schema) : optProp(key, schema),
+    ),
+  );
+}
 
 export const openApiSchemas = {
   LeadStatus: {
@@ -58,40 +70,43 @@ export const openApiSchemas = {
   Lead: {
     type: "object",
     required: ["id", "county", "state", "lead_type"],
-    properties: {
-      id: { type: "string", example: "MO-JACKSON-PREFC-001" },
-      county: { type: "string", example: "Jackson" },
-      state: { $ref: "#/components/schemas/UsStateCode" },
-      lead_type: { $ref: "#/components/schemas/LeadType" },
-      owner_name: { type: "string", nullable: true },
-      address: { type: "string", nullable: true },
-      city: { type: "string", nullable: true },
-      zip: { type: "string", nullable: true },
-      mailing_address: { type: "string", nullable: true },
-      mailing_city: { type: "string", nullable: true },
-      mailing_state: { type: "string", nullable: true },
-      mailing_zip: { type: "string", nullable: true },
-      case_number: { type: "string", nullable: true },
-      filing_date: { type: "string", format: "date", nullable: true },
-      assessed_value: { type: "string", nullable: true },
-      tax_year: { type: "string", nullable: true },
-      lender: { type: "string", nullable: true },
-      loan_amount: { type: "string", nullable: true },
-      sale_date: { type: "string", nullable: true },
-      sale_amount: { type: "string", nullable: true },
-      description: { type: "string", nullable: true },
-      source_url: { type: "string", format: "uri", nullable: true },
-      raw_data: { type: "string", nullable: true },
-      status: { $ref: "#/components/schemas/LeadStatus" },
-      notes: { type: "string", nullable: true },
-      skip_traced: { oneOf: [{ type: "integer" }, { type: "boolean" }] },
-      st_phone: { type: "string", nullable: true },
-      st_email: { type: "string", nullable: true },
-      st_mailing: { type: "string", nullable: true },
-      scraped_at: { type: "string", format: "date-time" },
-      created_at: { type: "string", format: "date-time" },
-      updated_at: { type: "string", format: "date-time" },
-    },
+    properties: markedProps(
+      {
+        id: { type: "string", example: "MO-JACKSON-PREFC-001" },
+        county: { type: "string", example: "Jackson" },
+        state: { $ref: "#/components/schemas/UsStateCode" },
+        lead_type: { $ref: "#/components/schemas/LeadType" },
+        owner_name: { type: "string", nullable: true },
+        address: { type: "string", nullable: true },
+        city: { type: "string", nullable: true },
+        zip: { type: "string", nullable: true },
+        mailing_address: { type: "string", nullable: true },
+        mailing_city: { type: "string", nullable: true },
+        mailing_state: { type: "string", nullable: true },
+        mailing_zip: { type: "string", nullable: true },
+        case_number: { type: "string", nullable: true },
+        filing_date: { type: "string", format: "date", nullable: true },
+        assessed_value: { type: "string", nullable: true },
+        tax_year: { type: "string", nullable: true },
+        lender: { type: "string", nullable: true },
+        loan_amount: { type: "string", nullable: true },
+        sale_date: { type: "string", nullable: true },
+        sale_amount: { type: "string", nullable: true },
+        description: { type: "string", nullable: true },
+        source_url: { type: "string", format: "uri", nullable: true },
+        raw_data: { type: "string", nullable: true },
+        status: { $ref: "#/components/schemas/LeadStatus" },
+        notes: { type: "string", nullable: true },
+        skip_traced: { oneOf: [{ type: "integer" }, { type: "boolean" }] },
+        st_phone: { type: "string", nullable: true },
+        st_email: { type: "string", nullable: true },
+        st_mailing: { type: "string", nullable: true },
+        scraped_at: { type: "string", format: "date-time" },
+        created_at: { type: "string", format: "date-time" },
+        updated_at: { type: "string", format: "date-time" },
+      },
+      ["id", "county", "state", "lead_type"],
+    ),
   },
   LeadListData: {
     type: "object",
@@ -172,7 +187,7 @@ export const openApiSchemas = {
   SettingsUpdate: {
     type: "object",
     additionalProperties: false,
-    properties: {
+    properties: optProps({
       smtp_host: { type: "string" },
       smtp_port: { type: "string" },
       smtp_user: { type: "string" },
@@ -185,7 +200,7 @@ export const openApiSchemas = {
       bright_data_user: { type: "string" },
       bright_data_pass: { type: "string" },
       attom_api_key: { type: "string" },
-    },
+    }),
   },
   ScrapeStatus: {
     type: "object",
@@ -212,37 +227,39 @@ export const openApiSchemas = {
     type: "object",
     required: ["status"],
     properties: {
-      status: { $ref: "#/components/schemas/LeadStatus" },
-      notes: { type: "string" },
+      ...Object.fromEntries([
+        reqProp("status", { $ref: "#/components/schemas/LeadStatus" }),
+        optProp("notes", { type: "string" }),
+      ]),
     },
   },
   ScrapeTriggerBody: {
     type: "object",
-    properties: {
+    properties: optProps({
       from_date: { type: "string", format: "date", example: "2026-01-01" },
       to_date: { type: "string", format: "date", example: "2026-01-07" },
-    },
+    }),
   },
   HistoricalScrapeBody: {
     type: "object",
-    properties: {
+    properties: optProps({
       days_back: { type: "integer", minimum: 1, maximum: 90, default: 30, example: 30 },
-    },
+    }),
   },
   TestEmailBody: {
     type: "object",
-    properties: {
+    properties: optProps({
       email: { type: "string", format: "email" },
-    },
+    }),
   },
   AdminDeleteBody: {
     type: "object",
-    properties: {
+    properties: optProps({
       county: { type: "string" },
       source_url: { type: "string", format: "uri" },
       owner_name_contains: { type: "string" },
-    },
-    description: "At least one filter field is required.",
+    }),
+    description: "At least one filter field is required. All fields marked with ? in the model.",
   },
   ImportResult: {
     type: "object",
@@ -261,51 +278,54 @@ export const openApiSchemas = {
 } as const;
 
 export const openApiParameters = {
-  CountyQuery: {
+  CountyQuery: optParam({
     name: "county",
     in: "query",
     schema: { type: "string" },
     description: "Filter by county name",
-  },
-  LeadTypeQuery: {
+  }),
+  LeadTypeQuery: optParam({
     name: "lead_type",
     in: "query",
     schema: { $ref: "#/components/schemas/LeadType" },
     description: "Filter by lead type",
-  },
-  StatusQuery: {
+  }),
+  StatusQuery: optParam({
     name: "status",
     in: "query",
     schema: { $ref: "#/components/schemas/LeadStatus" },
     description: "Filter by lead status",
-  },
-  FromDateQuery: {
+  }),
+  FromDateQuery: optParam({
     name: "from_date",
     in: "query",
     schema: { type: "string", format: "date" },
-  },
-  ToDateQuery: {
+    description: "Filing date on or after (YYYY-MM-DD)",
+  }),
+  ToDateQuery: optParam({
     name: "to_date",
     in: "query",
     schema: { type: "string", format: "date" },
-  },
-  LimitQuery: {
+    description: "Filing date on or before (YYYY-MM-DD)",
+  }),
+  LimitQuery: optParam({
     name: "limit",
     in: "query",
     schema: { type: "integer", minimum: 1, maximum: 5000, default: 100 },
-  },
-  OffsetQuery: {
+    description: "Page size (default 100)",
+  }),
+  OffsetQuery: optParam({
     name: "offset",
     in: "query",
     schema: { type: "integer", minimum: 0, default: 0 },
-  },
-  LeadIdParam: {
+    description: "Pagination offset (default 0)",
+  }),
+  LeadIdParam: reqParam({
     name: "id",
     in: "path",
-    required: true,
     schema: { type: "string" },
     description: "Lead ID",
-  },
+  }),
 } as const;
 
 export const openApiResponses = {

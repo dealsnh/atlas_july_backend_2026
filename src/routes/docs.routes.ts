@@ -25,6 +25,13 @@ router.use(
       .swagger-ui .topbar { display: none; }
       .swagger-ui .info .title { font-size: 2rem; }
       .swagger-ui .info { margin: 24px 0; }
+      .swagger-ui .parameters-col_name .parameter__name:not(.required)::after,
+      .swagger-ui table.model tr.property-row:not(.required) .prop-name::after {
+        content: "?";
+        color: #888;
+        font-weight: normal;
+        margin-left: 2px;
+      }
     `,
     swaggerOptions: {
       persistAuthorization: true,
