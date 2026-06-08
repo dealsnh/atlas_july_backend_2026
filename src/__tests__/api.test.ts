@@ -78,6 +78,50 @@ describe("API routes", () => {
     });
   });
 
+  describe("auth API", () => {
+    const testEmail = `auth-test-${Date.now()}@example.com`;
+    const testPassword = "TestPass123!";
+    let token = "";
+
+    it("POST /api/auth/signup creates a user", async () => {
+      const res = await request(app)
+        .post("/api/auth/signup")
+        .send({ email: testEmail, password: testPassword, name: "Test User" });
+      expect(res.status).toBe(201);
+      expect(res.body.ok).toBe(true);
+      expect(res.body.token).toBeTruthy();
+      expect(res.body.user.email).toBe(testEmail.toLowerCase());
+      token = res.body.token;
+    });
+
+    it("POST /api/auth/login returns token", async () => {
+      const res = await request(app)
+        .post("/api/auth/login")
+        .send({ email: testEmail, password: testPassword });
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      expect(res.body.token).toBeTruthy();
+      token = res.body.token;
+    });
+
+    it("GET /api/auth/me returns current user", async () => {
+      const res = await request(app)
+        .get("/api/auth/me")
+        .set("Authorization", `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      expect(res.body.user.email).toBe(testEmail.toLowerCase());
+    });
+
+    it("POST /api/v1/auth/login returns wrapped response", async () => {
+      const res = await request(app)
+        .post("/api/v1/auth/login")
+        .send({ email: testEmail, password: testPassword });
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.token).toBeTruthy();
+    });
+  });
+
   describe("legacy API (frontend compatibility)", () => {
     it("GET /api/leads returns flat response", async () => {
       const res = await request(app).get("/api/leads?limit=10");

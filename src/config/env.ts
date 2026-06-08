@@ -26,6 +26,10 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().optional(),
   API_KEY: z.string().optional(),
+  JWT_SECRET: z.string().min(16).optional(),
+  JWT_EXPIRES_IN: z.string().default("7d"),
+  ADMIN_EMAIL: z.string().email().optional(),
+  ADMIN_PASSWORD: z.string().min(8).optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

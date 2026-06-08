@@ -18,6 +18,12 @@ import {
   legacyTriggerScrape,
   legacyUpdateLead,
 } from "../../controllers/legacy.controller.js";
+import {
+  legacyLoginHandler,
+  legacyMeHandler,
+  legacySignupHandler,
+} from "../../controllers/auth.controller.js";
+import { jwtAuthMiddleware } from "../../middleware/jwt-auth.js";
 import { validate } from "../../middleware/validate.js";
 import {
   adminDeleteSchema,
@@ -30,9 +36,14 @@ import {
   testEmailSchema,
   updateLeadSchema,
 } from "../../schemas/api.schema.js";
+import { loginSchema, signupSchema } from "../../schemas/auth.schema.js";
 import { asyncHandler } from "../../utils/async-handler.js";
 
 const router: IRouter = Router();
+
+router.post("/auth/signup", validate(signupSchema), asyncHandler(legacySignupHandler));
+router.post("/auth/login", validate(loginSchema), asyncHandler(legacyLoginHandler));
+router.get("/auth/me", asyncHandler(jwtAuthMiddleware), asyncHandler(legacyMeHandler));
 
 router.get("/leads", validate(leadsQuerySchema, "query"), asyncHandler(legacyListLeads));
 router.get("/leads/export", validate(leadsQuerySchema, "query"), asyncHandler(legacyExportLeads));

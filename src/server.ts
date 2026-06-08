@@ -39,6 +39,7 @@ export async function startServer(): Promise<Server> {
           scraperApi: env.SCRAPER_API_KEY ? "configured" : "not set",
           smtp: env.SMTP_HOST ? "configured" : "not set",
           apiKey: env.API_KEY ? "configured" : "not set",
+          jwt: env.JWT_SECRET ? "configured" : "not set",
           database: env.DATABASE_URL.replace(/:[^:@/]+@/, ":****@"),
           urls: {
             server: baseUrl,
@@ -46,6 +47,8 @@ export async function startServer(): Promise<Server> {
             openapiJson: `${baseUrl}/api/docs/openapi.json`,
             health: `${baseUrl}/api/v1/health`,
             ready: `${baseUrl}/api/v1/ready`,
+            authLogin: `${baseUrl}/api/auth/login`,
+            authSignup: `${baseUrl}/api/auth/signup`,
             config: `${baseUrl}/api/v1/config`,
             legacyApi: `${baseUrl}/api`,
             v1Api: `${baseUrl}/api/v1`,

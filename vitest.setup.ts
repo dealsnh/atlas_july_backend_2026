@@ -13,3 +13,6 @@ if (process.env.TEST_DATABASE_URL) {
 }
 
 process.env.DATABASE_SSL = "false";
+process.env.JWT_SECRET = process.env.JWT_SECRET || "test-jwt-secret-min-16-chars";
+process.env.ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@test.com";
+process.env.ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "TestPass123!";

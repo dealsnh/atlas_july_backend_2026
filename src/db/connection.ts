@@ -1,6 +1,7 @@
 import pg from "pg";
 import { env } from "../config/env.js";
 import { logger } from "../utils/logger.js";
+import { seedAdminUserIfNeeded } from "../services/auth.service.js";
 import { CLEANUP_JUNK_LEADS_SQL, SCHEMA_SQL } from "./schema.js";
 
 const { Pool } = pg;
@@ -31,6 +32,7 @@ export async function initDb(): Promise<void> {
   }
 
   logger.info("PostgreSQL database initialized");
+  await seedAdminUserIfNeeded();
 }
 
 export async function closeDb(): Promise<void> {
@@ -52,5 +54,7 @@ export async function isDbReady(): Promise<boolean> {
 
 export async function resetDbForTests(): Promise<void> {
   await initDb();
-  await getPool().query("TRUNCATE TABLE leads, scrape_runs, settings RESTART IDENTITY CASCADE");
+  await getPool().query(
+    "TRUNCATE TABLE leads, scrape_runs, settings, users RESTART IDENTITY CASCADE",
+  );
 }
