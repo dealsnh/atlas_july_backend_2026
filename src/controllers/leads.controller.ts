@@ -5,6 +5,7 @@ import {
   listLeads,
   patchLead,
   seedDemoLeads,
+  skipTraceLead,
 } from "../services/leads.service.js";
 import { getRawSettings } from "../services/settings.service.js";
 import { ApiError } from "../utils/api-error.js";
@@ -40,14 +41,20 @@ export async function seedLeadsHandler(_req: Request, res: Response): Promise<vo
   successResponse(res, 200, undefined, result);
 }
 
-export async function skipTraceHandler(_req: Request, _res: Response): Promise<void> {
+export async function skipTraceHandler(req: Request, res: Response): Promise<void> {
+  const id = req.params.id as string;
   const settings = await getRawSettings();
   if (!settings.skip_trace_key) {
     throw ApiError.badRequest(
       "Easy Button Skip Trace API key not configured. Go to Settings to add it.",
     );
   }
-  throw ApiError.notImplemented(
-    "Easy Button Skip Trace API endpoint not yet wired up. Contact your Atlas administrator.",
-  );
+
+  const result = await skipTraceLead(id);
+  successResponse(res, 200, undefined, {
+    ok: true,
+    phone: result.phone,
+    email: result.email,
+    mailing: result.mailing,
+  });
 }

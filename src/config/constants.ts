@@ -4,6 +4,10 @@ export interface ClientCounty {
   name: string;
   county: string;
   state: string;
+  /** publicsearch.us subdomain slug (e.g. "jackson") */
+  publicsearch_slug?: string;
+  /** publicsearch.us state code (e.g. "mo") */
+  publicsearch_state?: string;
 }
 
 export interface ClientConfig {
@@ -21,6 +25,8 @@ function parseCounties(raw: string): ClientCounty[] {
       name: entry.name || entry.county || "",
       county: entry.name || entry.county || "",
       state: entry.state || "",
+      publicsearch_slug: entry.publicsearch_slug,
+      publicsearch_state: entry.publicsearch_state,
     }));
   } catch {
     return [];

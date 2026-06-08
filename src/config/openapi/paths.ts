@@ -343,12 +343,39 @@ export const openApiPaths = {
     post: {
       tags: ["Leads"],
       summary: "Skip trace a lead",
-      description: "Requires skip_trace_key in settings. Currently returns 501 until Easy Button API is wired.",
+      description:
+        "Calls Easy Button Skip Trace API (or SKIP_TRACE_API_URL). Requires skip_trace_key in settings.",
       operationId: "skipTraceLead",
       security: authSecurity,
       parameters: [openApiParameters.LeadIdParam],
       responses: {
-        "501": openApiResponses.NotImplemented,
+        "200": {
+          description: "Skip trace completed",
+          content: {
+            "application/json": {
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                  {
+                    type: "object",
+                    properties: {
+                      data: {
+                        type: "object",
+                        properties: {
+                          ok: { type: "boolean" },
+                          phone: { type: "string", nullable: true },
+                          email: { type: "string", nullable: true },
+                          mailing: { type: "string", nullable: true },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+        "404": openApiResponses.NotFound,
         "400": openApiResponses.BadRequest,
         "401": openApiResponses.Unauthorized,
       },
@@ -358,7 +385,8 @@ export const openApiPaths = {
     post: {
       tags: ["Leads"],
       summary: "Bulk import leads",
-      description: "Accepts an array of lead objects. Idempotent insert-if-not-exists.",
+      description:
+        "Accepts an array of lead objects. Idempotent insert-if-not-exists. When auto_skip_trace is enabled, newly inserted leads are skip-traced automatically.",
       operationId: "importLeads",
       security: authSecurity,
       requestBody: reqBody({
@@ -760,6 +788,51 @@ export const openApiPaths = {
           },
         },
         "400": openApiResponses.BadRequest,
+        "401": openApiResponses.Unauthorized,
+      },
+    },
+  },
+  "/api/v1/admin/scrape/validate": {
+    post: {
+      tags: ["Admin"],
+      summary: "QA dry-run scrape for one county",
+      description:
+        "Runs scrapers + assessor enrichment for a county without saving leads. Use for production QA.",
+      operationId: "validateCountyScrape",
+      security: authSecurity,
+      requestBody: reqBody({
+        "application/json": {
+          schema: {
+            type: "object",
+            required: ["county", "state"],
+            properties: {
+              county: { type: "string" },
+              state: { type: "string", minLength: 2, maxLength: 2 },
+              lead_type: { type: "string" },
+              days_back: { type: "integer", minimum: 1, maximum: 90 },
+            },
+          },
+        },
+      }),
+      responses: {
+        "200": {
+          description: "Validation result with sample leads",
+          content: {
+            "application/json": {
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                  {
+                    type: "object",
+                    properties: {
+                      data: { $ref: "#/components/schemas/ValidateScrapeResult" },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
         "401": openApiResponses.Unauthorized,
       },
     },

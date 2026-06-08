@@ -5,6 +5,7 @@ import * as wisconsin from "./wisconsin.js";
 import * as alabama from "./alabama.js";
 import * as ohio from "./ohio.js";
 import * as southCarolina from "./south_carolina.js";
+import { scrapePublicSearchLeads } from "./publicsearch-leads.js";
 
 // Run all scrapers for the configured counties
 export async function runAllScrapers(
@@ -71,6 +72,26 @@ export async function runAllScrapers(
         }
         allLeads.push(...leads);
         onProgress?.(`✓ ${(county.name || (county as any).county || "")} ${county.state}: ${leads.length} leads`);
+
+        if (county.publicsearch_slug && county.publicsearch_state) {
+          try {
+            onProgress?.(`Scraping ${county.name} via publicsearch.us...`);
+            const psLeads = await scrapePublicSearchLeads(
+              county.name || (county as any).county || "",
+              county.state,
+              county.publicsearch_slug,
+              county.publicsearch_state,
+              fromDate,
+              toDate,
+            );
+            allLeads.push(...psLeads);
+            onProgress?.(`✓ publicsearch ${county.name}: ${psLeads.length} leads`);
+          } catch (e) {
+            const msg = `Error scraping publicsearch ${county.name}: ${(e as Error).message}`;
+            errors.push(msg);
+            onProgress?.(`✗ ${msg}`);
+          }
+        }
       } catch (e) {
         const msg = `Error scraping ${(county.name || (county as any).county || "")} ${county.state}: ${(e as Error).message}`;
         errors.push(msg);

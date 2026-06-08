@@ -10,6 +10,9 @@ import {
 } from "../repositories/leads.repository.js";
 import type { Lead, LeadFilters } from "../types/lead.js";
 import { leadsToCsv } from "./csv.service.js";
+import { getRawSettings } from "./settings.service.js";
+import { runSkipTrace, skipTraceLeadsBatch } from "./skip-trace.service.js";
+import { ApiError } from "../utils/api-error.js";
 
 export async function listLeads(
   filters: LeadFilters,
@@ -35,20 +38,31 @@ export async function importLeads(leads: Array<Record<string, string | null>>): 
   inserted: number;
   skipped: number;
   total: number;
+  skip_traced?: number;
 }> {
   let inserted = 0;
   let skipped = 0;
+  const newLeadIds: string[] = [];
 
   for (const lead of leads) {
     try {
-      if (await insertLeadIfNotExists(lead)) inserted++;
-      else skipped++;
+      if (await insertLeadIfNotExists(lead)) {
+        inserted++;
+        if (lead.id) newLeadIds.push(String(lead.id));
+      } else skipped++;
     } catch {
       skipped++;
     }
   }
 
-  return { inserted, skipped, total: leads.length };
+  const settings = await getRawSettings();
+  let skipTraced = 0;
+  if (settings.auto_skip_trace === "true" && settings.skip_trace_key && newLeadIds.length) {
+    const result = await skipTraceLeadsBatch(newLeadIds, findLeadById, settings.skip_trace_key);
+    skipTraced = result.traced;
+  }
+
+  return { inserted, skipped, total: leads.length, skip_traced: skipTraced };
 }
 
 export async function seedDemoLeads(): Promise<{ inserted: number; total: number }> {
@@ -153,13 +167,22 @@ export async function getStatsWithLastScrape(lastScrapeTime: string | null) {
   return { ...(await getLeadStats()), lastScrapeTime };
 }
 
-export async function skipTraceLead(id: string): Promise<never> {
+export async function skipTraceLead(id: string) {
   const lead = await findLeadById(id);
   if (!lead) {
-    throw new Error("Lead not found");
+    throw ApiError.notFound("Lead not found");
   }
-  await updateLeadSkipTrace(id, {});
-  throw new Error("NOT_IMPLEMENTED");
+
+  const settings = await getRawSettings();
+  if (!settings.skip_trace_key) {
+    throw ApiError.badRequest(
+      "Easy Button Skip Trace API key not configured. Go to Settings to add it.",
+    );
+  }
+
+  const result = await runSkipTrace(lead, settings.skip_trace_key);
+  await updateLeadSkipTrace(id, result);
+  return result;
 }
 
 export { getLeadStats, findLeadById };

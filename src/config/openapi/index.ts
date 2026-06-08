@@ -14,7 +14,7 @@ export function buildOpenApiSpec(serverUrl?: string) {
     info: {
       title: "Atlas County Scraper API",
       version: "1.0.0",
-      description: "Production REST API for the Atlas county lead scraper platform.",
+      description: "Production REST API for the Atlas county lead scraper platform. Documents `/api/v1/*` only; legacy flat `/api/*` routes are supported but not listed here.",
       contact: {
         name: "Atlas Lead Engine",
       },

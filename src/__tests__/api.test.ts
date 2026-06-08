@@ -97,9 +97,12 @@ describe("API routes", () => {
       expect(res.body.success).toBe(false);
     });
 
-    it("returns 404 for removed legacy /api/* routes", async () => {
-      const res = await request(app).get("/api/leads");
-      expect(res.status).toBe(404);
+    it("GET /api/leads returns flat legacy JSON", async () => {
+      const res = await request(app).get("/api/leads?limit=10");
+      expect(res.status).toBe(200);
+      expect(res.body.leads).toBeDefined();
+      expect(res.body.total).toBeGreaterThanOrEqual(1);
+      expect(res.body.success).toBeUndefined();
     });
   });
 

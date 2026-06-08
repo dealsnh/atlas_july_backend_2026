@@ -158,4 +158,6 @@ export interface CountyConfig {
   name: string;
   state: string;
   leadTypes: string[];
+  publicsearch_slug?: string;
+  publicsearch_state?: string;
 }

@@ -157,6 +157,16 @@ export const openApiSchemas = {
             name: { type: "string" },
             county: { type: "string" },
             state: { type: "string", enum: [...US_STATE_CODES] },
+            publicsearch_slug: {
+              type: "string",
+              description: "Optional publicsearch.us subdomain for recorder supplemental scrape",
+              example: "jackson",
+            },
+            publicsearch_state: {
+              type: "string",
+              description: "Optional publicsearch.us state code (lowercase)",
+              example: "mo",
+            },
           },
         },
       },
@@ -267,6 +277,31 @@ export const openApiSchemas = {
       inserted: { type: "integer" },
       skipped: { type: "integer" },
       total: { type: "integer" },
+      skip_traced: {
+        type: "integer",
+        description: "Present when auto_skip_trace is enabled in settings",
+      },
+    },
+  },
+  ValidateScrapeResult: {
+    type: "object",
+    properties: {
+      county: { type: "string" },
+      state: { type: "string" },
+      from_date: { type: "string", format: "date" },
+      to_date: { type: "string", format: "date" },
+      total: { type: "integer" },
+      by_type: {
+        type: "object",
+        additionalProperties: { type: "integer" },
+        description: "Lead counts grouped by lead_type",
+      },
+      errors: { type: "array", items: { type: "string" } },
+      leads: {
+        type: "array",
+        items: { $ref: "#/components/schemas/Lead" },
+        description: "Sample leads (dry run — not persisted)",
+      },
     },
   },
   OkResponse: {

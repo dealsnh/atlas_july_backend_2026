@@ -20,6 +20,7 @@ const envSchema = z.object({
   BRIGHT_DATA_PASS: z.string().optional(),
   ATTOM_API_KEY: z.string().optional(),
   SKIP_TRACE_KEY: z.string().optional(),
+  SKIP_TRACE_API_URL: z.string().url().optional(),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.string().default("587"),
   SMTP_USER: z.string().optional(),

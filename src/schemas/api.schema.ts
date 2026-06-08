@@ -60,4 +60,11 @@ export const adminDeleteSchema = z
     message: "Must provide at least one filter: county, source_url, or owner_name_contains",
   });
 
+export const validateScrapeSchema = z.object({
+  county: z.string().min(1),
+  state: z.string().length(2),
+  lead_type: z.enum(LEAD_TYPES).optional(),
+  days_back: z.coerce.number().int().positive().max(90).optional(),
+});
+
 export const importLeadsSchema = z.array(z.record(z.string(), z.unknown())).min(1);

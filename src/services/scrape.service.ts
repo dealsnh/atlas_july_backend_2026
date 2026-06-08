@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import { clientConfig } from "../config/constants.js";
-import { findLeads, insertLeadIfNotExists } from "../repositories/leads.repository.js";
+import { findLeadById, findLeads, insertLeadIfNotExists } from "../repositories/leads.repository.js";
 import {
   finishScrapeRun,
   getLastScrapeTime,
@@ -10,8 +10,10 @@ import {
 import { getDateRange, runAllScrapers } from "../scrapers/index.js";
 import type { CountyConfig } from "../scrapers/base.js";
 import { logger } from "../utils/logger.js";
+import { enrichLeads } from "./enrichment.service.js";
 import { sendDailyReport } from "./email.service.js";
 import { getEmailRecipients, getRawSettings, isSmtpReady } from "./settings.service.js";
+import { skipTraceLeadsBatch } from "./skip-trace.service.js";
 
 const DEFAULT_LEAD_TYPES = [
   "Pre-Foreclosure",
@@ -56,7 +58,28 @@ function buildCountyConfigs(): CountyConfig[] {
     name: county.name || county.county,
     state: county.state,
     leadTypes: DEFAULT_LEAD_TYPES,
+    publicsearch_slug: county.publicsearch_slug,
+    publicsearch_state: county.publicsearch_state,
   }));
+}
+
+async function maybeAutoSkipTrace(
+  newLeadIds: string[],
+  onProgress?: (msg: string) => void,
+): Promise<void> {
+  if (!newLeadIds.length) return;
+
+  const settings = await getRawSettings();
+  if (settings.auto_skip_trace !== "true" || !settings.skip_trace_key) return;
+
+  onProgress?.(`Auto skip-tracing ${newLeadIds.length} new leads...`);
+  const { traced, failed } = await skipTraceLeadsBatch(
+    newLeadIds,
+    findLeadById,
+    settings.skip_trace_key,
+    onProgress,
+  );
+  onProgress?.(`✓ Auto skip trace: ${traced} traced, ${failed} failed`);
 }
 
 export async function runScrapeJob(fromDate: string, toDate: string): Promise<number> {
@@ -76,10 +99,24 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
       logger.info({ msg }, "Scrape progress");
     });
 
-    for (const lead of leads) {
+    const enrichedLeads = await enrichLeads(leads, (msg) => {
+      lastScrapeLog.push(msg);
+      logger.info({ msg }, "Enrichment progress");
+    });
+
+    const newLeadIds: string[] = [];
+    for (const lead of enrichedLeads) {
       const isNew = await insertLeadIfNotExists(lead as unknown as Record<string, string | null>);
-      if (isNew) totalNew++;
+      if (isNew) {
+        totalNew++;
+        newLeadIds.push(lead.id);
+      }
     }
+
+    await maybeAutoSkipTrace(newLeadIds, (msg) => {
+      lastScrapeLog.push(msg);
+      logger.info({ msg }, "Skip trace progress");
+    });
 
     if (errors.length) {
       lastScrapeLog.push(`⚠ ${errors.length} errors: ${errors.join("; ")}`);
@@ -148,3 +185,61 @@ export function startDailyCron(): void {
 }
 
 export { getDateRange };
+
+/** Dry-run scrape for QA — does not persist leads. */
+export async function validateCountyScrape(params: {
+  county: string;
+  state: string;
+  lead_type?: string;
+  days_back?: number;
+}): Promise<{
+  county: string;
+  state: string;
+  from_date: string;
+  to_date: string;
+  leads: Awaited<ReturnType<typeof enrichLeads>>;
+  errors: string[];
+  total: number;
+  by_type: Record<string, number>;
+}> {
+  const daysBack = Math.min(params.days_back ?? 7, 90);
+  const { fromDate, toDate } = getDateRange(daysBack);
+
+  const countyConfig: CountyConfig = {
+    name: params.county,
+    state: params.state,
+    leadTypes: params.lead_type ? [params.lead_type] : DEFAULT_LEAD_TYPES,
+  };
+
+  const configured = clientConfig.counties.find(
+    (c) =>
+      c.state === params.state &&
+      (c.name === params.county || c.county === params.county),
+  );
+  if (configured?.publicsearch_slug) {
+    countyConfig.publicsearch_slug = configured.publicsearch_slug;
+    countyConfig.publicsearch_state = configured.publicsearch_state;
+  }
+
+  const { leads, errors } = await runAllScrapers([countyConfig], fromDate, toDate);
+  const enriched = await enrichLeads(leads);
+  const filtered = params.lead_type
+    ? enriched.filter((l) => l.lead_type === params.lead_type)
+    : enriched;
+
+  const by_type: Record<string, number> = {};
+  for (const lead of filtered) {
+    by_type[lead.lead_type] = (by_type[lead.lead_type] ?? 0) + 1;
+  }
+
+  return {
+    county: params.county,
+    state: params.state,
+    from_date: fromDate,
+    to_date: toDate,
+    leads: filtered,
+    errors,
+    total: filtered.length,
+    by_type,
+  };
+}
