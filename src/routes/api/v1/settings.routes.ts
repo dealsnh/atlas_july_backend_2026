@@ -13,10 +13,10 @@ import { asyncHandler } from "../../../utils/async-handler.js";
 const router: IRouter = Router();
 
 router.get("/", asyncHandler(getSettingsHandler));
-router.post("/", authMiddleware, validate(settingsSchema), asyncHandler(saveSettingsHandler));
+router.post("/", asyncHandler(authMiddleware), validate(settingsSchema), asyncHandler(saveSettingsHandler));
 router.post(
   "/test-email",
-  authMiddleware,
+  asyncHandler(authMiddleware),
   validate(testEmailSchema),
   asyncHandler(testEmailHandler),
 );

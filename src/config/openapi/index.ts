@@ -25,6 +25,7 @@ export function buildOpenApiSpec(serverUrl?: string) {
     ],
     tags: [
       { name: "Health", description: "Liveness and readiness probes" },
+      { name: "Auth", description: "User signup, login, and session (JWT)" },
       { name: "Config", description: "Client configuration" },
       { name: "Leads", description: "Lead CRUD, import, export, skip trace" },
       { name: "Stats", description: "Dashboard statistics" },
@@ -45,7 +46,13 @@ export function buildOpenApiSpec(serverUrl?: string) {
           type: "http",
           scheme: "bearer",
           bearerFormat: "API Key",
-          description: "Same API key as Bearer token",
+          description: "Service API key (`API_KEY` env) for machine-to-machine access",
+        },
+        UserJwtAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+          description: "User JWT from login — also accepted on protected routes via `authMiddleware`",
         },
       },
       schemas: openApiSchemas,

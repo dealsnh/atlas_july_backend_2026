@@ -275,6 +275,49 @@ export const openApiSchemas = {
       ok: { type: "boolean", example: true },
     },
   },
+  PublicUser: {
+    type: "object",
+    required: ["id", "email", "created_at"],
+    properties: {
+      id: { type: "string", format: "uuid", example: "d4917307-bdbd-44a0-9fa1-3da52a036d68" },
+      email: { type: "string", format: "email", example: "tina@nationalhouses.com" },
+      name: { type: "string", nullable: true, example: "Admin" },
+      created_at: { type: "string", format: "date-time" },
+    },
+  },
+  AuthTokenData: {
+    type: "object",
+    required: ["user", "token"],
+    properties: {
+      user: { $ref: "#/components/schemas/PublicUser" },
+      token: {
+        type: "string",
+        description: "JWT access token — send as `Authorization: Bearer <token>`",
+        example: "eyJhbGciOiJIUzI1NiJ9...",
+      },
+    },
+  },
+  SignupBody: {
+    type: "object",
+    required: ["email", "password"],
+    properties: {
+      ...Object.fromEntries([
+        reqProp("email", { type: "string", format: "email" }),
+        reqProp("password", { type: "string", minLength: 8 }),
+        optProp("name", { type: "string", maxLength: 120 }),
+      ]),
+    },
+  },
+  LoginBody: {
+    type: "object",
+    required: ["email", "password"],
+    properties: {
+      ...Object.fromEntries([
+        reqProp("email", { type: "string", format: "email" }),
+        reqProp("password", { type: "string" }),
+      ]),
+    },
+  },
 } as const;
 
 export const openApiParameters = {
@@ -338,7 +381,7 @@ export const openApiResponses = {
     },
   },
   Unauthorized: {
-    description: "Missing or invalid API key",
+    description: "Missing or invalid credentials or token",
     content: {
       "application/json": {
         schema: { $ref: "#/components/schemas/ApiErrorEnvelope" },

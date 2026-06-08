@@ -55,6 +55,20 @@ describe("API routes", () => {
       const res = await request(app).get("/api/v1/stats");
       expect(res.status).toBe(200);
       expect(res.body.data.total).toBeGreaterThanOrEqual(1);
+      expect(res.body.data).toHaveProperty("lastScrapeTime");
+    });
+
+    it("GET /api/v1/config", async () => {
+      const res = await request(app).get("/api/v1/config");
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveProperty("name");
+      expect(res.body.data).toHaveProperty("counties");
+    });
+
+    it("GET /api/v1/settings", async () => {
+      const res = await request(app).get("/api/v1/settings");
+      expect(res.status).toBe(200);
+      expect(res.body.data).toHaveProperty("smtp_configured");
     });
 
     it("PATCH /api/v1/leads/:id updates status", async () => {
@@ -76,6 +90,17 @@ describe("API routes", () => {
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveProperty("in_progress");
     });
+
+    it("returns 404 for unknown routes", async () => {
+      const res = await request(app).get("/api/v1/unknown-route");
+      expect(res.status).toBe(404);
+      expect(res.body.success).toBe(false);
+    });
+
+    it("returns 404 for removed legacy /api/* routes", async () => {
+      const res = await request(app).get("/api/leads");
+      expect(res.status).toBe(404);
+    });
   });
 
   describe("auth API", () => {
@@ -83,78 +108,42 @@ describe("API routes", () => {
     const testPassword = "TestPass123!";
     let token = "";
 
-    it("POST /api/auth/signup creates a user", async () => {
+    it("POST /api/v1/auth/signup creates a user", async () => {
       const res = await request(app)
-        .post("/api/auth/signup")
+        .post("/api/v1/auth/signup")
         .send({ email: testEmail, password: testPassword, name: "Test User" });
       expect(res.status).toBe(201);
-      expect(res.body.ok).toBe(true);
-      expect(res.body.token).toBeTruthy();
-      expect(res.body.user.email).toBe(testEmail.toLowerCase());
-      token = res.body.token;
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.token).toBeTruthy();
+      expect(res.body.data.user.email).toBe(testEmail.toLowerCase());
+      token = res.body.data.token;
     });
 
-    it("POST /api/auth/login returns token", async () => {
-      const res = await request(app)
-        .post("/api/auth/login")
-        .send({ email: testEmail, password: testPassword });
-      expect(res.status).toBe(200);
-      expect(res.body.ok).toBe(true);
-      expect(res.body.token).toBeTruthy();
-      token = res.body.token;
-    });
-
-    it("GET /api/auth/me returns current user", async () => {
-      const res = await request(app)
-        .get("/api/auth/me")
-        .set("Authorization", `Bearer ${token}`);
-      expect(res.status).toBe(200);
-      expect(res.body.user.email).toBe(testEmail.toLowerCase());
-    });
-
-    it("POST /api/v1/auth/login returns wrapped response", async () => {
+    it("POST /api/v1/auth/login returns token", async () => {
       const res = await request(app)
         .post("/api/v1/auth/login")
         .send({ email: testEmail, password: testPassword });
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data.token).toBeTruthy();
+      token = res.body.data.token;
     });
-  });
 
-  describe("legacy API (frontend compatibility)", () => {
-    it("GET /api/leads returns flat response", async () => {
-      const res = await request(app).get("/api/leads?limit=10");
+    it("GET /api/v1/auth/me returns current user", async () => {
+      const res = await request(app)
+        .get("/api/v1/auth/me")
+        .set("Authorization", `Bearer ${token}`);
       expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty("leads");
-      expect(res.body).toHaveProperty("total");
-      expect(Array.isArray(res.body.leads)).toBe(true);
+      expect(res.body.data.user.email).toBe(testEmail.toLowerCase());
     });
 
-    it("GET /api/stats returns flat response", async () => {
-      const res = await request(app).get("/api/stats");
+    it("PATCH /api/v1/leads/:id accepts JWT bearer", async () => {
+      const res = await request(app)
+        .patch("/api/v1/leads/test-lead-001")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ status: "contacted" });
       expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty("total");
-      expect(res.body).toHaveProperty("lastScrapeTime");
-    });
-
-    it("GET /api/config", async () => {
-      const res = await request(app).get("/api/config");
-      expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty("name");
-      expect(res.body).toHaveProperty("counties");
-    });
-
-    it("GET /api/settings", async () => {
-      const res = await request(app).get("/api/settings");
-      expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty("smtp_configured");
-    });
-
-    it("returns 404 for unknown routes", async () => {
-      const res = await request(app).get("/api/v1/unknown-route");
-      expect(res.status).toBe(404);
-      expect(res.body.success).toBe(false);
+      expect(res.body.data.ok).toBe(true);
     });
   });
 
@@ -165,7 +154,10 @@ describe("API routes", () => {
       expect(res.body.openapi).toBe("3.0.3");
       expect(res.body.info.title).toBe("Atlas County Scraper API");
       expect(res.body.paths["/api/v1/leads"]).toBeDefined();
+      expect(res.body.paths["/api/v1/auth/login"]).toBeDefined();
+      expect(res.body.paths["/api/auth/login"]).toBeUndefined();
       expect(res.body.components.securitySchemes.ApiKeyAuth).toBeDefined();
+      expect(res.body.components.securitySchemes.UserJwtAuth).toBeDefined();
     });
 
     it("GET /api/docs serves Swagger UI", async () => {

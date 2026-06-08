@@ -23,14 +23,14 @@ router.get("/", validate(leadsQuerySchema, "query"), asyncHandler(listLeadsHandl
 router.get("/export", validate(leadsQuerySchema, "query"), asyncHandler(exportLeadsHandler));
 router.patch(
   "/:id",
-  authMiddleware,
+  asyncHandler(authMiddleware),
   validate(leadIdParamsSchema, "params"),
   validate(updateLeadSchema),
   asyncHandler(updateLeadHandler),
 );
 router.post(
   "/:id/skip-trace",
-  authMiddleware,
+  asyncHandler(authMiddleware),
   validate(leadIdParamsSchema, "params"),
   asyncHandler(skipTraceHandler),
 );
@@ -40,8 +40,8 @@ export default router;
 export const leadsMutatingRouter: IRouter = Router();
 leadsMutatingRouter.post(
   "/import",
-  authMiddleware,
+  asyncHandler(authMiddleware),
   validate(importLeadsSchema),
   asyncHandler(importLeadsHandler),
 );
-leadsMutatingRouter.post("/seed", authMiddleware, asyncHandler(seedLeadsHandler));
+leadsMutatingRouter.post("/seed", asyncHandler(authMiddleware), asyncHandler(seedLeadsHandler));

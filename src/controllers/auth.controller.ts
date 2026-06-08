@@ -15,17 +15,3 @@ export async function loginHandler(req: Request, res: Response): Promise<void> {
 export async function meHandler(req: Request, res: Response): Promise<void> {
   successResponse(res, 200, undefined, { user: req.user });
 }
-
-export async function legacySignupHandler(req: Request, res: Response): Promise<void> {
-  const result = await signupUser(req.body as { email: string; password: string; name?: string });
-  res.status(201).json({ ok: true, ...result });
-}
-
-export async function legacyLoginHandler(req: Request, res: Response): Promise<void> {
-  const result = await loginUser(req.body as { email: string; password: string });
-  res.json({ ok: true, ...result });
-}
-
-export async function legacyMeHandler(req: Request, res: Response): Promise<void> {
-  res.json({ ok: true, user: req.user });
-}

@@ -13,6 +13,107 @@ const leadFilters = [
 ];
 
 const authSecurity = [{ ApiKeyAuth: [] }, { BearerAuth: [] }];
+const userJwtSecurity = [{ UserJwtAuth: [] }];
+
+const v1AuthSignup = {
+  tags: ["Auth"],
+  summary: "Register a new user",
+  description: "Creates a user in PostgreSQL and returns a JWT. Admin is auto-seeded from `ADMIN_EMAIL` on first startup.",
+  operationId: "signupUser",
+  requestBody: reqBody({
+    "application/json": { schema: { $ref: "#/components/schemas/SignupBody" } },
+  }),
+  responses: {
+    "201": {
+      description: "Account created",
+      content: {
+        "application/json": {
+          schema: {
+            allOf: [
+              { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+              {
+                type: "object",
+                properties: {
+                  message: { type: "string", example: "Account created" },
+                  data: { $ref: "#/components/schemas/AuthTokenData" },
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+    "400": openApiResponses.BadRequest,
+    "409": openApiResponses.Conflict,
+  },
+};
+
+const v1AuthLogin = {
+  tags: ["Auth"],
+  summary: "Sign in",
+  description: "Validates email/password and returns a JWT for `Authorization: Bearer` headers.",
+  operationId: "loginUser",
+  requestBody: reqBody({
+    "application/json": { schema: { $ref: "#/components/schemas/LoginBody" } },
+  }),
+  responses: {
+    "200": {
+      description: "Login successful",
+      content: {
+        "application/json": {
+          schema: {
+            allOf: [
+              { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+              {
+                type: "object",
+                properties: {
+                  message: { type: "string", example: "Login successful" },
+                  data: { $ref: "#/components/schemas/AuthTokenData" },
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+    "400": openApiResponses.BadRequest,
+    "401": openApiResponses.Unauthorized,
+  },
+};
+
+const v1AuthMe = {
+  tags: ["Auth"],
+  summary: "Current user profile",
+  description: "Returns the authenticated user from the JWT.",
+  operationId: "getCurrentUser",
+  security: userJwtSecurity,
+  responses: {
+    "200": {
+      description: "Current user",
+      content: {
+        "application/json": {
+          schema: {
+            allOf: [
+              { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+              {
+                type: "object",
+                properties: {
+                  data: {
+                    type: "object",
+                    properties: {
+                      user: { $ref: "#/components/schemas/PublicUser" },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+    "401": openApiResponses.Unauthorized,
+  },
+};
 
 export const openApiPaths = {
   "/": {
@@ -124,6 +225,9 @@ export const openApiPaths = {
       },
     },
   },
+  "/api/v1/auth/signup": { post: v1AuthSignup },
+  "/api/v1/auth/login": { post: v1AuthLogin },
+  "/api/v1/auth/me": { get: v1AuthMe },
   "/api/v1/config": {
     get: {
       tags: ["Config"],

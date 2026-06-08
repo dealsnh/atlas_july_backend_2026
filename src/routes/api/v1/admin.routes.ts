@@ -7,6 +7,6 @@ import { asyncHandler } from "../../../utils/async-handler.js";
 
 const router: IRouter = Router();
 
-router.delete("/leads", authMiddleware, validate(adminDeleteSchema), asyncHandler(deleteLeadsHandler));
+router.delete("/leads", asyncHandler(authMiddleware), validate(adminDeleteSchema), asyncHandler(deleteLeadsHandler));
 
 export default router;
