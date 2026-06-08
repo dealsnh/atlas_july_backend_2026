@@ -1,16 +1,13 @@
 import { Router, type IRouter } from "express";
 import {
   exportLeadsHandler,
-  importLeadsHandler,
   listLeadsHandler,
-  seedLeadsHandler,
   skipTraceHandler,
   updateLeadHandler,
 } from "../../../controllers/leads.controller.js";
 import { authMiddleware } from "../../../middleware/auth.js";
 import { validate } from "../../../middleware/validate.js";
 import {
-  importLeadsSchema,
   leadIdParamsSchema,
   leadsQuerySchema,
   updateLeadSchema,
@@ -36,12 +33,3 @@ router.post(
 );
 
 export default router;
-
-export const leadsMutatingRouter: IRouter = Router();
-leadsMutatingRouter.post(
-  "/import",
-  asyncHandler(authMiddleware),
-  validate(importLeadsSchema),
-  asyncHandler(importLeadsHandler),
-);
-leadsMutatingRouter.post("/seed", asyncHandler(authMiddleware), asyncHandler(seedLeadsHandler));

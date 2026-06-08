@@ -1,10 +1,8 @@
 import type { Request, Response } from "express";
 import {
   exportLeadsCsv,
-  importLeads,
   listLeads,
   patchLead,
-  seedDemoLeads,
   skipTraceLead,
 } from "../services/leads.service.js";
 import { getRawSettings } from "../services/settings.service.js";
@@ -29,16 +27,6 @@ export async function updateLeadHandler(req: Request, res: Response): Promise<vo
   const { status, notes } = req.body as { status: string; notes?: string };
   await patchLead(id, status, notes);
   successResponse(res, 200, undefined, { ok: true });
-}
-
-export async function importLeadsHandler(req: Request, res: Response): Promise<void> {
-  const result = await importLeads(req.body as Array<Record<string, string | null>>);
-  successResponse(res, 200, undefined, result);
-}
-
-export async function seedLeadsHandler(_req: Request, res: Response): Promise<void> {
-  const result = await seedDemoLeads();
-  successResponse(res, 200, undefined, result);
 }
 
 export async function skipTraceHandler(req: Request, res: Response): Promise<void> {

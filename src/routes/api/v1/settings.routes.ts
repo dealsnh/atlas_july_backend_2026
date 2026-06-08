@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
 import {
-  getConfigHandler,
   getSettingsHandler,
   saveSettingsHandler,
   testEmailHandler,
@@ -22,6 +21,3 @@ router.post(
 );
 
 export default router;
-
-export const configRouter: IRouter = Router();
-configRouter.get("/", asyncHandler(getConfigHandler));

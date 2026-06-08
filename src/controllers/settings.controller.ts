@@ -51,10 +51,3 @@ export async function testEmailHandler(req: Request, res: Response): Promise<voi
     message: `Test email sent to ${testRecipient}`,
   });
 }
-
-export function getConfigHandler(_req: Request, res: Response): void {
-  successResponse(res, 200, undefined, {
-    name: clientConfig.name,
-    counties: clientConfig.counties,
-  });
-}

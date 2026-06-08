@@ -13,11 +13,10 @@ export function buildOpenApiSpec(serverUrl?: string) {
     openapi: "3.0.3",
     info: {
       title: "Atlas County Scraper API",
-      version: "1.1.0",
+      version: "1.2.0",
       description:
         "Production REST API for the Atlas county lead scraper platform (Tina / National Houses). " +
-        "Documents `/api/v1/*` only; legacy flat `/api/*` routes are supported but not listed here. " +
-        "New in 1.1: skip trace, auto skip trace on import/scrape, county QA validate, assessor enrichment, publicsearch.us counties.",
+        "All routes are under `/api/v1/*`. Counties and branding are configured via server env (`CLIENT_*`).",
       contact: {
         name: "Atlas Lead Engine",
       },
@@ -30,8 +29,7 @@ export function buildOpenApiSpec(serverUrl?: string) {
     tags: [
       { name: "Health", description: "Liveness and readiness probes" },
       { name: "Auth", description: "User signup, login, and session (JWT)" },
-      { name: "Config", description: "Client configuration" },
-      { name: "Leads", description: "Lead CRUD, import, export, skip trace" },
+      { name: "Leads", description: "Lead list, export, status updates, skip trace" },
       { name: "Stats", description: "Dashboard statistics" },
       { name: "Settings", description: "SMTP, scraper keys, email recipients" },
       { name: "Scrape", description: "Scrape orchestration and job history" },

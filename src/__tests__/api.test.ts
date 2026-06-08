@@ -58,13 +58,6 @@ describe("API routes", () => {
       expect(res.body.data).toHaveProperty("lastScrapeTime");
     });
 
-    it("GET /api/v1/config", async () => {
-      const res = await request(app).get("/api/v1/config");
-      expect(res.status).toBe(200);
-      expect(res.body.data).toHaveProperty("name");
-      expect(res.body.data).toHaveProperty("counties");
-    });
-
     it("GET /api/v1/settings", async () => {
       const res = await request(app).get("/api/v1/settings");
       expect(res.status).toBe(200);
@@ -79,12 +72,6 @@ describe("API routes", () => {
       expect(res.body.data.ok).toBe(true);
     });
 
-    it("POST /api/v1/seed inserts demo leads", async () => {
-      const res = await request(app).post("/api/v1/seed");
-      expect(res.status).toBe(200);
-      expect(res.body.data.total).toBe(3);
-    });
-
     it("GET /api/v1/scrape/status", async () => {
       const res = await request(app).get("/api/v1/scrape/status");
       expect(res.status).toBe(200);
@@ -95,14 +82,6 @@ describe("API routes", () => {
       const res = await request(app).get("/api/v1/unknown-route");
       expect(res.status).toBe(404);
       expect(res.body.success).toBe(false);
-    });
-
-    it("GET /api/leads returns flat legacy JSON", async () => {
-      const res = await request(app).get("/api/leads?limit=10");
-      expect(res.status).toBe(200);
-      expect(res.body.leads).toBeDefined();
-      expect(res.body.total).toBeGreaterThanOrEqual(1);
-      expect(res.body.success).toBeUndefined();
     });
   });
 
@@ -156,11 +135,14 @@ describe("API routes", () => {
       expect(res.status).toBe(200);
       expect(res.body.openapi).toBe("3.0.3");
       expect(res.body.info.title).toBe("Atlas County Scraper API");
-      expect(res.body.info.version).toBe("1.1.0");
+      expect(res.body.info.version).toBe("1.2.0");
       expect(res.body.paths["/api/v1/leads"]).toBeDefined();
       expect(res.body.paths["/api/v1/auth/login"]).toBeDefined();
       expect(res.body.paths["/api/v1/leads/{id}/skip-trace"]).toBeDefined();
       expect(res.body.paths["/api/v1/admin/scrape/validate"]).toBeDefined();
+      expect(res.body.paths["/api/v1/config"]).toBeUndefined();
+      expect(res.body.paths["/api/v1/import"]).toBeUndefined();
+      expect(res.body.paths["/api/v1/seed"]).toBeUndefined();
       expect(res.body.paths["/api/auth/login"]).toBeUndefined();
       expect(res.body.components.securitySchemes.ApiKeyAuth).toBeDefined();
       expect(res.body.components.securitySchemes.UserJwtAuth).toBeDefined();

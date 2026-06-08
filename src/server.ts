@@ -52,7 +52,6 @@ export async function startServer(): Promise<Server> {
             ready: `${baseUrl}/api/v1/ready`,
             authLogin: `${baseUrl}/api/v1/auth/login`,
             authSignup: `${baseUrl}/api/v1/auth/signup`,
-            config: `${baseUrl}/api/v1/config`,
             v1Api: `${baseUrl}/api/v1`,
           },
         },

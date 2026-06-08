@@ -228,31 +228,6 @@ export const openApiPaths = {
   "/api/v1/auth/signup": { post: v1AuthSignup },
   "/api/v1/auth/login": { post: v1AuthLogin },
   "/api/v1/auth/me": { get: v1AuthMe },
-  "/api/v1/config": {
-    get: {
-      tags: ["Config"],
-      summary: "Get client configuration",
-      operationId: "getConfig",
-      responses: {
-        "200": {
-          description: "Client name and target counties",
-          content: {
-            "application/json": {
-              schema: {
-                allOf: [
-                  { $ref: "#/components/schemas/ApiSuccessEnvelope" },
-                  {
-                    type: "object",
-                    properties: { data: { $ref: "#/components/schemas/ClientConfig" } },
-                  },
-                ],
-              },
-            },
-          },
-        },
-      },
-    },
-  },
   "/api/v1/leads": {
     get: {
       tags: ["Leads"],
@@ -377,81 +352,6 @@ export const openApiPaths = {
         },
         "404": openApiResponses.NotFound,
         "400": openApiResponses.BadRequest,
-        "401": openApiResponses.Unauthorized,
-      },
-    },
-  },
-  "/api/v1/import": {
-    post: {
-      tags: ["Leads"],
-      summary: "Bulk import leads",
-      description:
-        "Accepts an array of lead objects. Idempotent insert-if-not-exists. When auto_skip_trace is enabled, newly inserted leads are skip-traced automatically.",
-      operationId: "importLeads",
-      security: authSecurity,
-      requestBody: reqBody({
-        "application/json": {
-          schema: {
-            type: "array",
-            minItems: 1,
-            items: { $ref: "#/components/schemas/Lead" },
-          },
-        },
-      }),
-      responses: {
-        "200": {
-          description: "Import summary",
-          content: {
-            "application/json": {
-              schema: {
-                allOf: [
-                  { $ref: "#/components/schemas/ApiSuccessEnvelope" },
-                  {
-                    type: "object",
-                    properties: { data: { $ref: "#/components/schemas/ImportResult" } },
-                  },
-                ],
-              },
-            },
-          },
-        },
-        "400": openApiResponses.BadRequest,
-        "401": openApiResponses.Unauthorized,
-      },
-    },
-  },
-  "/api/v1/seed": {
-    post: {
-      tags: ["Leads"],
-      summary: "Seed demo leads",
-      description: "Inserts 3 sample leads for development/demo. Requires authentication.",
-      operationId: "seedLeads",
-      security: authSecurity,
-      responses: {
-        "200": {
-          description: "Seed result",
-          content: {
-            "application/json": {
-              schema: {
-                allOf: [
-                  { $ref: "#/components/schemas/ApiSuccessEnvelope" },
-                  {
-                    type: "object",
-                    properties: {
-                      data: {
-                        type: "object",
-                        properties: {
-                          inserted: { type: "integer" },
-                          total: { type: "integer" },
-                        },
-                      },
-                    },
-                  },
-                ],
-              },
-            },
-          },
-        },
         "401": openApiResponses.Unauthorized,
       },
     },

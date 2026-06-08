@@ -145,33 +145,6 @@ export const openApiSchemas = {
       lastScrapeTime: { type: "string", format: "date-time", nullable: true },
     },
   },
-  ClientConfig: {
-    type: "object",
-    properties: {
-      name: { type: "string", example: "Atlas" },
-      counties: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            name: { type: "string" },
-            county: { type: "string" },
-            state: { type: "string", enum: [...US_STATE_CODES] },
-            publicsearch_slug: {
-              type: "string",
-              description: "Optional publicsearch.us subdomain for recorder supplemental scrape",
-              example: "jackson",
-            },
-            publicsearch_state: {
-              type: "string",
-              description: "Optional publicsearch.us state code (lowercase)",
-              example: "mo",
-            },
-          },
-        },
-      },
-    },
-  },
   SettingsMasked: {
     type: "object",
     properties: {
@@ -270,18 +243,6 @@ export const openApiSchemas = {
       owner_name_contains: { type: "string" },
     }),
     description: "At least one filter field is required. All fields marked with ? in the model.",
-  },
-  ImportResult: {
-    type: "object",
-    properties: {
-      inserted: { type: "integer" },
-      skipped: { type: "integer" },
-      total: { type: "integer" },
-      skip_traced: {
-        type: "integer",
-        description: "Present when auto_skip_trace is enabled in settings",
-      },
-    },
   },
   ValidateScrapeResult: {
     type: "object",

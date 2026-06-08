@@ -32,13 +32,4 @@ describe("health routes", () => {
     expect(response.body.success).toBe(true);
     expect(response.body.data.status).toBe("ok");
   });
-
-  it("returns client config", async () => {
-    const response = await request(app).get("/api/v1/config");
-
-    expect(response.status).toBe(200);
-    expect(response.body.success).toBe(true);
-    expect(response.body.data).toHaveProperty("name");
-    expect(response.body.data).toHaveProperty("counties");
-  });
 });

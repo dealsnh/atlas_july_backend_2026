@@ -120,14 +120,7 @@ async function main(): Promise<void> {
     pass("GET /api/v1/auth/me", "skipped — no JWT");
   }
 
-  // Config & settings
-  const config = await getJson("/api/v1/config");
-  const configData = config.body.data as Record<string, unknown> | undefined;
-  const counties = configData?.counties as unknown[] | undefined;
-  if (config.status === 200 && Array.isArray(counties) && counties.length >= 1) {
-    pass("GET /api/v1/config", `${counties.length} counties`);
-  } else fail("GET /api/v1/config", JSON.stringify(config.body));
-
+  // Settings
   const settings = await getJson("/api/v1/settings");
   const settingsData = settings.body.data as Record<string, unknown> | undefined;
   if (settings.status === 200 && settingsData) {
@@ -153,26 +146,10 @@ async function main(): Promise<void> {
   if (leads.status === 200) pass("GET /api/v1/leads");
   else fail("GET /api/v1/leads", JSON.stringify(leads.body));
 
-  // Legacy route
-  try {
-    const legacyRes = await fetch(`${BASE}/api/leads?limit=5`);
-    const legacy = (await legacyRes.json()) as Record<string, unknown>;
-    if (legacyRes.status === 200 && Array.isArray(legacy.leads)) {
-      pass("GET /api/leads (legacy)", `total=${legacy.total}`);
-    } else fail("GET /api/leads (legacy)", JSON.stringify(legacy));
-  } catch (e) {
-    fail("GET /api/leads (legacy)", e instanceof Error ? e.message : String(e));
-  }
-
   // Scrape status
   const scrapeStatus = await getJson("/api/v1/scrape/status");
   if (scrapeStatus.status === 200) pass("GET /api/v1/scrape/status");
   else fail("GET /api/v1/scrape/status", JSON.stringify(scrapeStatus.body));
-
-  // Seed (idempotent demo data)
-  const seed = await postJson("/api/v1/seed", undefined, token || undefined);
-  if (seed.status === 200) pass("POST /api/v1/seed");
-  else fail("POST /api/v1/seed", JSON.stringify(seed.body));
 
   // QA validate — one county, 1 day (live scrapers; 90s timeout)
   console.log("\n  Running county QA validate (Madison AL, 1 day) — up to 90s...\n");

@@ -81,7 +81,7 @@ export function createApp(): express.Application {
   app.get("/", (_req, res) => {
     successResponse(res, 200, undefined, {
       name: "Atlas County Scraper API",
-      version: "1.0.0",
+      version: "1.2.0",
       docs: OPENAPI_DOCS_PATH,
       openapi: "/api/docs/openapi.json",
     });

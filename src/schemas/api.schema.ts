@@ -67,4 +67,3 @@ export const validateScrapeSchema = z.object({
   days_back: z.coerce.number().int().positive().max(90).optional(),
 });
 
-export const importLeadsSchema = z.array(z.record(z.string(), z.unknown())).min(1);

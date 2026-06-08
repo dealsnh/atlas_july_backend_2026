@@ -28,10 +28,3 @@ export async function getReady(_req: Request, res: Response): Promise<void> {
 
   errorResponse(res, 503, "Service not ready", { data });
 }
-
-export function getConfig(_req: Request, res: Response): void {
-  successResponse(res, 200, undefined, {
-    name: clientConfig.name,
-    counties: clientConfig.counties,
-  });
-}
