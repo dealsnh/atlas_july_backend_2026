@@ -1,6 +1,9 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+
+dotenv.config({ override: true });
 
 process.env.NODE_ENV = "test";
+delete process.env.API_KEY;
 
 if (process.env.TEST_DATABASE_URL) {
   process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;

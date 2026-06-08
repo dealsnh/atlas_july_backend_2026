@@ -156,8 +156,11 @@ describe("API routes", () => {
       expect(res.status).toBe(200);
       expect(res.body.openapi).toBe("3.0.3");
       expect(res.body.info.title).toBe("Atlas County Scraper API");
+      expect(res.body.info.version).toBe("1.1.0");
       expect(res.body.paths["/api/v1/leads"]).toBeDefined();
       expect(res.body.paths["/api/v1/auth/login"]).toBeDefined();
+      expect(res.body.paths["/api/v1/leads/{id}/skip-trace"]).toBeDefined();
+      expect(res.body.paths["/api/v1/admin/scrape/validate"]).toBeDefined();
       expect(res.body.paths["/api/auth/login"]).toBeUndefined();
       expect(res.body.components.securitySchemes.ApiKeyAuth).toBeDefined();
       expect(res.body.components.securitySchemes.UserJwtAuth).toBeDefined();

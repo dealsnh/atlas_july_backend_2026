@@ -13,14 +13,18 @@ export function buildOpenApiSpec(serverUrl?: string) {
     openapi: "3.0.3",
     info: {
       title: "Atlas County Scraper API",
-      version: "1.0.0",
-      description: "Production REST API for the Atlas county lead scraper platform. Documents `/api/v1/*` only; legacy flat `/api/*` routes are supported but not listed here.",
+      version: "1.1.0",
+      description:
+        "Production REST API for the Atlas county lead scraper platform (Tina / National Houses). " +
+        "Documents `/api/v1/*` only; legacy flat `/api/*` routes are supported but not listed here. " +
+        "New in 1.1: skip trace, auto skip trace on import/scrape, county QA validate, assessor enrichment, publicsearch.us counties.",
       contact: {
         name: "Atlas Lead Engine",
       },
     },
     servers: [
       { url: defaultServer, description: "Current environment" },
+      { url: "https://web-production-871d9.up.railway.app", description: "Railway production" },
       { url: "http://localhost:3001", description: "Local development" },
     ],
     tags: [

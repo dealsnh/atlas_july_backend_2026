@@ -13,7 +13,8 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "seed": "tsx src/scripts/seed-csvs.ts",
-    "test:mo-scraper": "tsx src/scripts/test-mo-scraper.ts"
+    "test:mo-scraper": "tsx src/scripts/test-mo-scraper.ts",
+    "test:flow": "tsx src/scripts/test-flow.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
