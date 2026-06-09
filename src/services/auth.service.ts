@@ -82,15 +82,22 @@ export async function seedAdminUserIfNeeded(): Promise<void> {
   if (existing) return;
 
   const passwordHash = await bcrypt.hash(env.ADMIN_PASSWORD, SALT_ROUNDS);
-  await createUser({
-    id: randomUUID(),
-    email: env.ADMIN_EMAIL,
-    passwordHash,
-    name: "Admin",
-  });
-
-  logger.info(
-    { email: env.ADMIN_EMAIL, totalUsersBefore: total },
-    "Seeded admin user from ADMIN_EMAIL",
-  );
+  try {
+    await createUser({
+      id: randomUUID(),
+      email: env.ADMIN_EMAIL,
+      passwordHash,
+      name: "Admin",
+    });
+    logger.info(
+      { email: env.ADMIN_EMAIL, totalUsersBefore: total },
+      "Seeded admin user from ADMIN_EMAIL",
+    );
+  } catch (err) {
+    // Hot-reload can race two inits; user may exist by the time INSERT runs
+    if (err instanceof Error && "code" in err && (err as { code: string }).code === "23505") {
+      return;
+    }
+    throw err;
+  }
 }
