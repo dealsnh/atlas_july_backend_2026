@@ -249,16 +249,15 @@ export async function validateCountyScrape(params: {
 
   const { leads, errors } = await runAllScrapers([countyConfig], fromDate, toDate);
   const countyNorm = params.county.toLowerCase();
-  const countyLeads = leads.filter((l) => l.county.toLowerCase() === countyNorm);
-  const capped = params.lead_type
-    ? countyLeads.filter((l) => l.lead_type === params.lead_type).slice(0, 100)
-    : countyLeads.slice(0, 100);
-  const enriched = await enrichLeads(capped);
-  const filtered = enriched.filter((l) => {
+  let filtered = leads.filter((l) => {
     if (l.county.toLowerCase() !== countyNorm) return false;
     if (params.lead_type && l.lead_type !== params.lead_type) return false;
     return true;
   });
+  // Scrapers already run inline assessor enrichment; avoid re-enriching hundreds in QA.
+  if (!filtered.some((l) => isLeadSaveable(l))) {
+    filtered = await enrichLeads(filtered.slice(0, 25));
+  }
 
   const by_type: Record<string, number> = {};
   for (const lead of filtered) {

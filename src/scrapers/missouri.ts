@@ -508,7 +508,8 @@ async function scrapeKCCodeViolations(fromDate: string, toDate: string): Promise
       "Contract and Labor Violations",
     ];
     const typeClause = types.map((t) => `issue_type='${t}'`).join(" OR ");
-    const url = `https://data.kcmo.org/resource/d4px-6rwg.json?$where=open_date_time>='${fromDate}T00:00:00' AND (${typeClause})&$limit=500&$order=open_date_time DESC`;
+    const where = `open_date_time>='${fromDate}T00:00:00' AND (${typeClause})`;
+    const url = `https://data.kcmo.org/resource/d4px-6rwg.json?$where=${encodeURIComponent(where)}&$limit=100&$order=${encodeURIComponent("open_date_time DESC")}`;
     const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
     if (!res.ok) return leads;
 
@@ -548,7 +549,7 @@ async function scrapeKCCodeViolations(fromDate: string, toDate: string): Promise
     }
 
     const CONCURRENCY_ADDR = 10;
-    const unenrichedAddr = leads.filter((l) => !l.owner_name && l.address);
+    const unenrichedAddr = leads.filter((l) => !l.owner_name && l.address).slice(0, 40);
     for (let i = 0; i < unenrichedAddr.length; i += CONCURRENCY_ADDR) {
       const batch = unenrichedAddr.slice(i, i + CONCURRENCY_ADDR);
       const results = await Promise.all(
@@ -934,8 +935,12 @@ async function scrapeMOWaterShutoffs(fromDate: string, toDate: string): Promise<
   try {
     // KC 311 Socrata — CONFIRMED WORKING
     // Dataset: d4px-6rwg (2021-present) | Fields: open_date_time, issue_type, issue_sub_type, incident_address, workorder_
-    const url = `https://data.kcmo.org/resource/d4px-6rwg.json?$where=open_date_time>='${fromDate}T00:00:00' AND issue_type='Water Service' AND issue_sub_type='No Water'&$limit=500&$order=open_date_time DESC`;
+    const where = `open_date_time>='${fromDate}T00:00:00' AND issue_type='Water Service'`;
+    const url = `https://data.kcmo.org/resource/d4px-6rwg.json?$where=${encodeURIComponent(where)}&$limit=100&$order=${encodeURIComponent("open_date_time DESC")}`;
     const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
+    if (!res.ok) {
+      console.error(`[MO] Water Shutoffs fetch failed: HTTP ${res.status}`);
+    }
     if (res.ok) {
       const data = await res.json() as Record<string, string>[];
       for (const item of data) {
@@ -961,15 +966,15 @@ async function scrapeMOWaterShutoffs(fromDate: string, toDate: string): Promise<
 
     // Enrich with owner name via assessor address lookup — 10 concurrent
     const CONCURRENCY_ADDR = 10;
-    const unenrichedAddr = leads.filter(l => !l.owner_name && l.address);
+    const unenrichedAddr = leads.filter((l) => !l.owner_name && l.address).slice(0, 40);
     for (let i = 0; i < unenrichedAddr.length; i += CONCURRENCY_ADDR) {
       const batch = unenrichedAddr.slice(i, i + CONCURRENCY_ADDR);
-      const results = await Promise.all(batch.map(l => lookupByAddress(l.address!, l.county, STATE)));
+      const results = await Promise.all(batch.map((l) => lookupByAddress(l.address!, l.county, STATE)));
       for (let j = 0; j < batch.length; j++) {
         const prop = results[j];
         if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
         if (prop?.zip && !batch[j].zip) batch[j].zip = prop.zip;
-        if (prop?.parcelId) batch[j].raw_data = JSON.stringify({ ...JSON.parse(batch[j].raw_data || '{}'), parcelId: prop.parcelId });
+        if (prop?.parcelId) batch[j].raw_data = JSON.stringify({ ...JSON.parse(batch[j].raw_data || "{}"), parcelId: prop.parcelId });
       }
     }
 
@@ -987,8 +992,12 @@ async function scrapeMOFireDamage(fromDate: string, toDate: string): Promise<Lea
   try {
     // KC 311 Socrata — CONFIRMED WORKING
     // Dataset: d4px-6rwg (2021-present) | issue_type: 'Dangerous Buildings', 'Open Burning/Fire'
-    const url = `https://data.kcmo.org/resource/d4px-6rwg.json?$where=open_date_time>='${fromDate}T00:00:00' AND (issue_type='Dangerous Buildings' OR issue_type='Open Burning/Fire')&$limit=500&$order=open_date_time DESC`;
+    const where = `open_date_time>='${fromDate}T00:00:00' AND (issue_type='Dangerous Buildings' OR issue_type='Open Burning/Fire')`;
+    const url = `https://data.kcmo.org/resource/d4px-6rwg.json?$where=${encodeURIComponent(where)}&$limit=100&$order=${encodeURIComponent("open_date_time DESC")}`;
     const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
+    if (!res.ok) {
+      console.error(`[MO] Fire Damage fetch failed: HTTP ${res.status}`);
+    }
     if (res.ok) {
       const data = await res.json() as Record<string, string>[];
       for (const item of data) {
@@ -1014,15 +1023,15 @@ async function scrapeMOFireDamage(fromDate: string, toDate: string): Promise<Lea
 
     // Enrich with owner name via assessor address lookup — 10 concurrent
     const CONCURRENCY_ADDR = 10;
-    const unenrichedAddr = leads.filter(l => !l.owner_name && l.address);
+    const unenrichedAddr = leads.filter((l) => !l.owner_name && l.address).slice(0, 40);
     for (let i = 0; i < unenrichedAddr.length; i += CONCURRENCY_ADDR) {
       const batch = unenrichedAddr.slice(i, i + CONCURRENCY_ADDR);
-      const results = await Promise.all(batch.map(l => lookupByAddress(l.address!, l.county, STATE)));
+      const results = await Promise.all(batch.map((l) => lookupByAddress(l.address!, l.county, STATE)));
       for (let j = 0; j < batch.length; j++) {
         const prop = results[j];
         if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
         if (prop?.zip && !batch[j].zip) batch[j].zip = prop.zip;
-        if (prop?.parcelId) batch[j].raw_data = JSON.stringify({ ...JSON.parse(batch[j].raw_data || '{}'), parcelId: prop.parcelId });
+        if (prop?.parcelId) batch[j].raw_data = JSON.stringify({ ...JSON.parse(batch[j].raw_data || "{}"), parcelId: prop.parcelId });
       }
     }
 

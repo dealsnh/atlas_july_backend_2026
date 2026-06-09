@@ -152,7 +152,7 @@ async function scrapeTaxDelinquent(fromDate: string, toDate: string): Promise<Le
     const wb = XLSX.read(buf, { type: "buffer" });
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json<Record<string, string | number>>(sheet);
-    for (const row of rows.slice(0, 300)) {
+    for (const row of rows.slice(0, 100)) {
       const parcel = String(row.parcel_number || "").trim();
       const owner1 = String(row.owner_name_1 || "").trim();
       const owner2 = String(row.owner_name_2 || "").trim();
@@ -190,7 +190,7 @@ async function scrapeTaxDelinquent(fromDate: string, toDate: string): Promise<Le
     }
 
     const CONCURRENCY = 10;
-    const needsSitus = leads.filter((l) => l.owner_name);
+    const needsSitus = leads.filter((l) => l.owner_name).slice(0, 40);
     for (let i = 0; i < needsSitus.length; i += CONCURRENCY) {
       const batch = needsSitus.slice(i, i + CONCURRENCY);
       const results = await Promise.all(
@@ -283,41 +283,61 @@ async function scrapeProbate(fromDate: string, toDate: string): Promise<Lead[]> 
 async function scrapeCodeViolationsHamilton(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
   try {
-    // Cincinnati Open Data Portal — code enforcement violations
-    // Public JSON API, no auth required
-    // CONFIRMED WORKING: cncm-znd6 = Cincinnati Code Enforcement dataset
-    const url = `https://data.cincinnati-oh.gov/resource/cncm-znd6.json?$where=entered_date>='${fromDate}'&$limit=500&$order=entered_date DESC`;
+    const where = `entered_date>='${fromDate}'`;
+    const url = `https://data.cincinnati-oh.gov/resource/cncm-znd6.json?$where=${encodeURIComponent(where)}&$limit=100&$order=${encodeURIComponent("entered_date DESC")}`;
     const res = await fetchWithRetry(url, {
-      headers: { "Accept": "application/json" },
+      headers: { Accept: "application/json" },
     });
     if (!res.ok) return leads;
-    const data = await res.json() as Record<string, string>[];
+    const data = (await res.json()) as Record<string, string>[];
 
     for (const item of data) {
       const address = item.full_address || item.address || "";
       const type = item.comp_type_desc || item.sub_type_desc || item.violation_type || "Code Violation";
       const date = item.entered_date || item.date_initiated || fromDate;
       const caseNum = item.number_key || item.case_number || item.id || "";
-
       if (!address && !caseNum) continue;
-      const enriched = address ? await lookupByAddress(address, "Hamilton", "OH") : null;
 
       leads.push({
         id: makeId("CV", caseNum || address, "Hamilton", "OH"),
-        county: "Hamilton", state: "OH",
+        county: "Hamilton",
+        state: "OH",
         lead_type: "Code Violation",
-        owner_name: enriched?.ownerName || item.owner_name || item.property_owner || null,
-        address: enriched?.address || address || null, city: enriched?.city || "Cincinnati", zip: enriched?.zip || item.zip || null,
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+        owner_name: item.owner_name || item.property_owner || null,
+        address: address || null,
+        city: "Cincinnati",
+        zip: item.zip || null,
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
         case_number: caseNum || null,
         filing_date: formatDate(date),
-        assessed_value: null, tax_year: null,
-        lender: null, loan_amount: null,
-        sale_date: null, sale_amount: null,
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
+        sale_date: null,
+        sale_amount: null,
         description: `Code Violation — ${type} — ${address}`,
         source_url: "https://data.cincinnati-oh.gov/Neighborhoods/Cincinnati-Code-Enforcement/cncm-znd6",
         raw_data: JSON.stringify(item),
       });
+    }
+
+    const CONCURRENCY = 10;
+    const batchTargets = leads.filter((l) => !l.owner_name?.trim() && l.address).slice(0, 40);
+    for (let i = 0; i < batchTargets.length; i += CONCURRENCY) {
+      const batch = batchTargets.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(
+        batch.map((l) => lookupByAddress(l.address!, "Hamilton", "OH")),
+      );
+      for (let j = 0; j < batch.length; j++) {
+        const prop = results[j];
+        if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
+        if (prop?.address) batch[j].address = prop.address;
+        if (prop?.zip) batch[j].zip = prop.zip;
+      }
     }
   } catch (e) {
     console.error("[Hamilton OH] Code Violations error:", e);
