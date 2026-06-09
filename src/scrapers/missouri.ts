@@ -1073,15 +1073,26 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
       const desc  = (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) || item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
       const pubDate = (item.match(/<pubDate>(.+?)<\/pubDate>/))?.[1]?.trim() || "";
       const caseNum = (title.match(/([0-9]{2}-[0-9]{5})/)?.[1]) || title;
+      if (pubDate) {
+        const d = new Date(pubDate);
+        if (!isNaN(d.getTime())) {
+          const from = new Date(fromDate);
+          const to = new Date(toDate);
+          to.setHours(23, 59, 59, 999);
+          if (d < from || d > to) continue;
+        }
+      }
       // Strip full case prefix including chapter suffix: e.g. "26-40368-btf13 " or "26-30205-7 "
       const ownerFromTitle = title.replace(/^[0-9]{2}-[0-9]{5}(-[a-zA-Z0-9]+)?\s*/, "").trim();
       const caseName = ownerFromTitle || desc.replace(/<[^>]+>/g, "").replace(/&[a-z0-9#]+;/g, "").trim();
       bkItems.push({ title, link, pubDate, caseNum, caseName });
     }
+    const MAX_BK_ITEMS = 25;
+    const itemsToProcess = bkItems.slice(0, MAX_BK_ITEMS);
     // Parallel assessor lookups — 5 concurrent
     const CONCURRENCY = 5;
-    for (let i = 0; i < bkItems.length; i += CONCURRENCY) {
-      const batch = bkItems.slice(i, i + CONCURRENCY);
+    for (let i = 0; i < itemsToProcess.length; i += CONCURRENCY) {
+      const batch = itemsToProcess.slice(i, i + CONCURRENCY);
       const results = await Promise.all(
         batch.map(b => lookupOwnerProperties(b.caseName, COUNTY, STATE))
       );

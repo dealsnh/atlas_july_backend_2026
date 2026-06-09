@@ -30,6 +30,10 @@ export async function exportLeadsCsv(
 }
 
 export async function patchLead(id: string, status: string, notes?: string): Promise<void> {
+  const lead = await findLeadById(id);
+  if (!lead) {
+    throw ApiError.notFound("Lead not found");
+  }
   await updateLeadStatus(id, status, notes);
 }
 
