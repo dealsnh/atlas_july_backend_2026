@@ -248,9 +248,12 @@ export async function validateCountyScrape(params: {
 
   const { leads, errors } = await runAllScrapers([countyConfig], fromDate, toDate);
   const enriched = await enrichLeads(leads);
-  const filtered = params.lead_type
-    ? enriched.filter((l) => l.lead_type === params.lead_type)
-    : enriched;
+  const countyNorm = params.county.toLowerCase();
+  const filtered = enriched.filter((l) => {
+    if (l.county.toLowerCase() !== countyNorm) return false;
+    if (params.lead_type && l.lead_type !== params.lead_type) return false;
+    return true;
+  });
 
   const by_type: Record<string, number> = {};
   for (const lead of filtered) {

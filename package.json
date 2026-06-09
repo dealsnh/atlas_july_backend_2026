@@ -16,7 +16,8 @@
     "test:mo-scraper": "tsx src/scripts/test-mo-scraper.ts",
     "test:flow": "tsx src/scripts/test-flow.ts",
     "test:live": "tsx src/scripts/live-e2e-test.ts",
-    "test:frontend": "tsx src/scripts/frontend-e2e-test.ts"
+    "test:frontend": "tsx src/scripts/frontend-e2e-test.ts",
+    "test:phase1": "tsx src/scripts/phase1-qa.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -36,6 +37,7 @@
     "pino-http": "^10.5.0",
     "swagger-ui-express": "^5.0.1",
     "ws": "^8.21.0",
+    "xlsx": "^0.18.5",
     "zod": "^4.1.12"
   },
   "devDependencies": {

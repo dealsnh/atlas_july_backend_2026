@@ -61,11 +61,31 @@ export async function runAllScrapers(
     // States with a single scrapeAll function (all 11 lead types)
     if (state === "MO") {
       try {
-        onProgress?.(`Scraping Missouri (all 11 lead types)...`);
-        const leads = await missouri.scrapeAll(fromDate, toDate);
-        allLeads.push(...leads);
-        onProgress?.(`✓ MO: ${leads.length} leads found`);
-        if (leads.length) await onLeadsBatch?.(leads);
+        const targeted =
+          stateCounties.length === 1 &&
+          stateCounties[0].leadTypes?.length > 0 &&
+          stateCounties[0].leadTypes.length < 11;
+        if (targeted) {
+          const c = stateCounties[0];
+          onProgress?.(
+            `Scraping ${c.name}, MO (${c.leadTypes.join(", ")})...`,
+          );
+          const leads = await missouri.scrapeCounty(
+            c.name,
+            fromDate,
+            toDate,
+            c.leadTypes,
+          );
+          allLeads.push(...leads);
+          onProgress?.(`✓ ${c.name} MO: ${leads.length} leads`);
+          if (leads.length) await onLeadsBatch?.(leads);
+        } else {
+          onProgress?.(`Scraping Missouri (all 11 lead types)...`);
+          const leads = await missouri.scrapeAll(fromDate, toDate);
+          allLeads.push(...leads);
+          onProgress?.(`✓ MO: ${leads.length} leads found`);
+          if (leads.length) await onLeadsBatch?.(leads);
+        }
       } catch (e) {
         const msg = `Error scraping MO: ${(e as Error).message}`;
         errors.push(msg);
@@ -94,10 +114,12 @@ export async function runAllScrapers(
       try {
         onProgress?.(`Scraping ${(county.name || (county as any).county || "")}, ${county.state} (all 11 lead types)...`);
         let leads: Lead[] = [];
+        const countyName = county.name || (county as any).county || "";
+        const leadTypes = county.leadTypes?.length ? county.leadTypes : undefined;
         if (state === "AL") {
-          leads = await alabama.scrapeAlabama((county.name || (county as any).county || ""), fromDate, toDate);
+          leads = await alabama.scrapeAlabama(countyName, fromDate, toDate, leadTypes);
         } else if (state === "OH") {
-          leads = await ohio.scrapeOhio((county.name || (county as any).county || ""), fromDate, toDate);
+          leads = await ohio.scrapeOhio(countyName, fromDate, toDate, leadTypes);
         } else if (state === "SC") {
           leads = await southCarolina.scrapeSC((county.name || (county as any).county || ""), fromDate, toDate);
         } else {

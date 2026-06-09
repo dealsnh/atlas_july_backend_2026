@@ -56,87 +56,183 @@ async function getTextRendered(url: string): Promise<string> {
 // Missouri Counties
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ─── Jackson County MO: ArcGIS AddressPoints + nomap.aspx/GetInfo ─────────────
-// CONFIRMED WORKING: ArcGIS FeatureServer for parcel lookup, nomap.aspx/GetInfo for owner data
-const JACKSON_ARCGIS_URL = 'https://services3.arcgis.com/4LOAHoFXfea6Y3Et/ArcGIS/rest/services/ParcelViewer_AddressPoints_View/FeatureServer/0/query';
-const JACKSON_GETINFO_URL = 'https://jcgis.jacksongov.org/propertyinfo/nomap.aspx/GetInfo';
-const JACKSON_GETINFO_HEADERS = {
-  'Content-Type': 'application/json; charset=utf-8',
-  'Accept': 'application/json, text/javascript, */*; q=0.01',
-  'Referer': 'https://jcgis.jacksongov.org/propertyinfo/',
-  'Origin': 'https://jcgis.jacksongov.org',
-  'X-Requested-With': 'XMLHttpRequest',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-};
+// ─── Jackson County MO: Parcels_Market_Value + AddressPoints fallback ─────────
+// Legacy ParcelViewer_Parcels_View no longer exposes owner/situs fields (2025+).
+const JACKSON_ADDRESS_POINTS_URL =
+  'https://services3.arcgis.com/4LOAHoFXfea6Y3Et/ArcGIS/rest/services/ParcelViewer_AddressPoints_View/FeatureServer/0/query';
+const JACKSON_MARKET_VALUE_URL =
+  'https://services3.arcgis.com/4LOAHoFXfea6Y3Et/ArcGIS/rest/services/Parcels_Market_Value/FeatureServer/0/query';
+
+function normalizeStreetForQuery(address: string): string {
+  let s = address
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ');
+  s = s
+    .replace(
+      /\s+(KANSAS CITY|KC|INDEPENDENCE|BLUE SPRINGS|LEES SUMMIT|LEE'S SUMMIT|GRAIN VALLEY|GRANDVIEW|RAYTOWN|MO)\b.*$/i,
+      '',
+    )
+    .trim();
+  s = s.replace(/\s+\d{5}(-\d{4})?\s*$/i, '').trim();
+  return s;
+}
+
+function buildAddressLikePatterns(address: string): string[] {
+  const street = normalizeStreetForQuery(address);
+  const parts = street.split(/\s+/).filter(Boolean);
+  if (!parts.length || !/^\d+$/.test(parts[0])) return [];
+  const patterns = new Set<string>();
+  for (let n = Math.min(parts.length, 6); n >= 2; n--) {
+    patterns.add(`${parts.slice(0, n).join(' ')}%`);
+  }
+  return [...patterns];
+}
+
+function mapJacksonMarketFeature(attrs: Record<string, string>): AssessorProperty | null {
+  const address = attrs.situs_address?.trim();
+  const ownerName = attrs.owner_info?.split('|')[0]?.trim();
+  if (!address || !ownerName) return null;
+  return {
+    address,
+    city: attrs.situs_city?.trim() || 'Kansas City',
+    state: 'MO',
+    zip: attrs.situs_zip?.trim() || undefined,
+    parcelId: attrs.parcel_number?.trim() || undefined,
+    ownerName,
+  };
+}
+
+async function queryJacksonMarketValue(
+  where: string,
+  limit = 5,
+): Promise<AssessorProperty[]> {
+  const qUrl = new URL(JACKSON_MARKET_VALUE_URL);
+  qUrl.searchParams.set('where', where);
+  qUrl.searchParams.set('outFields', 'parcel_number,situs_address,situs_city,situs_zip,owner_info');
+  qUrl.searchParams.set('returnGeometry', 'false');
+  qUrl.searchParams.set('f', 'json');
+  qUrl.searchParams.set('resultRecordCount', String(limit));
+  const res = await fetchWithRetry(qUrl.toString());
+  if (!res.ok) return [];
+  const data = (await res.json()) as { features?: { attributes: Record<string, string> }[] };
+  return (data.features || [])
+    .map((f) => mapJacksonMarketFeature(f.attributes))
+    .filter((p): p is AssessorProperty => !!p && /\d+\s+[A-Za-z]/.test(p.address));
+}
+
+const STREET_DIRECTIONALS = new Set([
+  'N', 'S', 'E', 'W', 'NW', 'NE', 'SW', 'SE', 'NORTH', 'SOUTH', 'EAST', 'WEST',
+]);
+const STREET_SUFFIXES = new Set([
+  'ST', 'STREET', 'AVE', 'AV', 'AVENUE', 'RD', 'ROAD', 'DR', 'DRIVE', 'CT', 'COURT',
+  'LN', 'LANE', 'BLVD', 'BOULEVARD', 'PL', 'PLACE', 'TER', 'TERRACE', 'WAY', 'CIR',
+]);
+
+function significantStreetTokens(parts: string[]): string[] {
+  return parts
+    .slice(1)
+    .filter((p) => !STREET_DIRECTIONALS.has(p) && !STREET_SUFFIXES.has(p) && !/^\d+$/.test(p));
+}
+
+function streetTokenMatch(a: string, b: string): number {
+  if (a === b) return 3;
+  if (a.startsWith(b) || b.startsWith(a)) return 2;
+  return 0;
+}
+
+function pickBestJacksonMatch(
+  candidates: AssessorProperty[],
+  queryStreet: string,
+): AssessorProperty | null {
+  if (!candidates.length) return null;
+  const target = normalizeStreetForQuery(queryStreet);
+  const targetParts = target.split(/\s+/);
+  const targetNum = targetParts[0];
+  const targetTokens = significantStreetTokens(targetParts);
+  let best: AssessorProperty | null = null;
+  let bestScore = -1;
+  for (const c of candidates) {
+    const situs = normalizeStreetForQuery(c.address);
+    if (!situs.startsWith(`${targetNum} `)) continue;
+    const situsParts = situs.split(/\s+/);
+    const situsTokens = significantStreetTokens(situsParts);
+    if (targetTokens.length > 0) {
+      let tokenScore = 0;
+      for (const t of targetTokens) {
+        const hit = situsTokens.some((s) => streetTokenMatch(t, s) >= 2);
+        if (hit) tokenScore += 3;
+      }
+      if (tokenScore < 3) continue;
+      if (tokenScore > bestScore) {
+        bestScore = tokenScore;
+        best = c;
+      }
+      continue;
+    }
+    let score = 0;
+    for (let i = 1; i < Math.min(targetParts.length, situsParts.length); i++) {
+      score += streetTokenMatch(targetParts[i], situsParts[i]);
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = c;
+    }
+  }
+  return best;
+}
+
+async function lookupJacksonMOByParcelId(parcelId: string): Promise<AssessorProperty | null> {
+  const safe = parcelId.replace(/'/g, "''");
+  const results = await queryJacksonMarketValue(`parcel_number = '${safe}'`, 1);
+  return results[0] || null;
+}
+
+async function lookupJacksonMOByAddress(address: string): Promise<AssessorProperty | null> {
+  const patterns = buildAddressLikePatterns(address);
+  for (const pattern of patterns) {
+    const results = await queryJacksonMarketValue(`UPPER(situs_address) LIKE '${pattern}'`, 8);
+    const match = pickBestJacksonMatch(results, address);
+    if (match?.ownerName) return match;
+  }
+
+  // AddressPoints → parcel id → owner (only when FULLADDR matches query street)
+  for (const pattern of patterns) {
+    const addrUrl = new URL(JACKSON_ADDRESS_POINTS_URL);
+    addrUrl.searchParams.set('where', `UPPER(FULLADDR) LIKE '${pattern}'`);
+    addrUrl.searchParams.set('outFields', 'ADDPTKEY,FULLADDR,ZIP');
+    addrUrl.searchParams.set('returnGeometry', 'false');
+    addrUrl.searchParams.set('f', 'json');
+    addrUrl.searchParams.set('resultRecordCount', '8');
+    const addrRes = await fetchWithRetry(addrUrl.toString());
+    if (!addrRes.ok) continue;
+    const addrData = (await addrRes.json()) as {
+      features?: { attributes: { ADDPTKEY?: string; FULLADDR?: string; ZIP?: string } }[];
+    };
+    const addrCandidates = (addrData.features || [])
+      .filter((f) => f.attributes.FULLADDR && f.attributes.ADDPTKEY)
+      .map((f) => ({
+        address: f.attributes.FULLADDR!,
+        city: 'Kansas City',
+        state: 'MO',
+        zip: f.attributes.ZIP || undefined,
+        parcelId: f.attributes.ADDPTKEY,
+        ownerName: 'pending',
+      }));
+    const addrMatch = pickBestJacksonMatch(addrCandidates, address);
+    if (!addrMatch?.parcelId) continue;
+    const prop = await lookupJacksonMOByParcelId(addrMatch.parcelId);
+    if (prop?.ownerName) return prop;
+  }
+  return null;
+}
 
 async function lookupJacksonMO(ownerName: string): Promise<AssessorProperty[]> {
   try {
     const { last } = parseName(ownerName);
-    // Step 1: Search ArcGIS Parcels layer by owner name
-    const parcelsUrl = 'https://services3.arcgis.com/4LOAHoFXfea6Y3Et/ArcGIS/rest/services/ParcelViewer_Parcels_View/FeatureServer/0/query';
-    const qUrl = new URL(parcelsUrl);
-    qUrl.searchParams.set('where', `UPPER(OWNER_NAME) LIKE '%${last.toUpperCase()}%'`);
-    qUrl.searchParams.set('outFields', 'PARCELID,OWNER_NAME,SITUS_ADDR,SITUS_CITY,SITUS_ZIP');
-    qUrl.searchParams.set('returnGeometry', 'false');
-    qUrl.searchParams.set('f', 'json');
-    qUrl.searchParams.set('resultRecordCount', '5');
-    const arcRes = await fetchWithRetry(qUrl.toString());
-    if (!arcRes.ok) return [];
-    const arcData = await arcRes.json() as { features?: { attributes: Record<string, string> }[] };
-    const features = arcData.features || [];
-    if (features.length > 0) {
-      // Return results directly from ArcGIS parcel layer
-      return features.map(f => ({
-        address: f.attributes.SITUS_ADDR || '',
-        city: f.attributes.SITUS_CITY || 'Kansas City',
-        state: 'MO',
-        zip: f.attributes.SITUS_ZIP || undefined,
-        parcelId: f.attributes.PARCELID || undefined,
-        ownerName: f.attributes.OWNER_NAME || undefined,
-      })).filter(p => p.address && /\d+\s+[A-Za-z]/.test(p.address));
-    }
-    // Step 2: Fallback — search AddressPoints by last name fragment, then GetInfo
-    const addrUrl = new URL(JACKSON_ARCGIS_URL);
-    addrUrl.searchParams.set('where', `UPPER(FULLNAME) LIKE '%${last.toUpperCase()}%'`);
-    addrUrl.searchParams.set('outFields', 'ADDPTKEY,FULLADDR');
-    addrUrl.searchParams.set('returnGeometry', 'false');
-    addrUrl.searchParams.set('f', 'json');
-    addrUrl.searchParams.set('resultRecordCount', '3');
-    const addrRes = await fetchWithRetry(addrUrl.toString());
-    if (!addrRes.ok) return [];
-    const addrData = await addrRes.json() as { features?: { attributes: { ADDPTKEY?: string; FULLADDR?: string } }[] };
-    const addrFeatures = addrData.features || [];
-    const results: AssessorProperty[] = [];
-    for (const feat of addrFeatures) {
-      const pid = feat.attributes.ADDPTKEY;
-      if (!pid) continue;
-      try {
-        const infoRes = await fetchWithRetry(JACKSON_GETINFO_URL, {
-          method: 'POST',
-          headers: JACKSON_GETINFO_HEADERS,
-          body: `{ 'PID': '${pid}' }`,
-        });
-        if (!infoRes.ok) continue;
-        const info = await infoRes.json() as { d?: (string | null)[] };
-        const d = info.d;
-        if (!d || d.length < 34) continue;
-        const owner = d[33] ? String(d[33]).trim() : null;
-        const addr = d[0] ? String(d[0]).trim() : feat.attributes.FULLADDR || null;
-        const cityStateZip = d[1] ? String(d[1]).trim() : null;
-        if (!owner || !addr) continue;
-        const zipMatch = cityStateZip?.match(/(\d{5})/);
-        const cityMatch = cityStateZip?.match(/^([^,]+)/);
-        results.push({
-          address: addr,
-          city: cityMatch?.[1]?.trim() || 'Kansas City',
-          state: 'MO',
-          zip: zipMatch?.[1] || undefined,
-          parcelId: pid,
-          ownerName: owner,
-        });
-      } catch { continue; }
-    }
-    return results;
+    if (!last) return [];
+    return await queryJacksonMarketValue(`UPPER(owner_info) LIKE '%${last.toUpperCase()}%'`, 5);
   } catch {
     return [];
   }
@@ -695,8 +791,13 @@ export async function lookupByAddress(
   const countyKey = county.toLowerCase().replace(/\s+county$/i, '').replace(/\s+/g, '-');
   try {
     if (state === 'MO') {
-      // Jackson/Clay/Cass/Platte MO — ArcGIS Parcels layer by SITUS_ADDR
-      const parcelsUrl = 'https://services3.arcgis.com/4LOAHoFXfea6Y3Et/ArcGIS/rest/services/ParcelViewer_Parcels_View/FeatureServer/0/query';
+      if (countyKey === 'jackson') {
+        const match = await lookupJacksonMOByAddress(address);
+        if (match) return match;
+      }
+      // Clay/Cass/Platte — legacy parcels layer (Jackson uses Parcels_Market_Value above)
+      const parcelsUrl =
+        'https://services3.arcgis.com/4LOAHoFXfea6Y3Et/ArcGIS/rest/services/ParcelViewer_Parcels_View/FeatureServer/0/query';
       const qUrl = new URL(parcelsUrl);
       qUrl.searchParams.set('where', `UPPER(SITUS_ADDR) LIKE '${streetNum} ${streetName}%'`);
       qUrl.searchParams.set('outFields', 'PARCELID,OWNER_NAME,SITUS_ADDR,SITUS_CITY,SITUS_ZIP');
@@ -705,9 +806,9 @@ export async function lookupByAddress(
       qUrl.searchParams.set('resultRecordCount', '1');
       const res = await fetchWithRetry(qUrl.toString());
       if (res.ok) {
-        const data = await res.json() as { features?: { attributes: Record<string, string> }[] };
+        const data = (await res.json()) as { features?: { attributes: Record<string, string> }[] };
         const f = data.features?.[0]?.attributes;
-        if (f && f.SITUS_ADDR) {
+        if (f?.SITUS_ADDR) {
           return {
             address: f.SITUS_ADDR,
             city: f.SITUS_CITY || 'Kansas City',

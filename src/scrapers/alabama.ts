@@ -4,7 +4,7 @@
  * Counties: Madison, Limestone, Morgan, Montgomery, Autauga, Elmore, Jefferson, Shelby
  */
 
-import { Lead, CountyConfig, makeId, formatDate, fetchWithRetry } from "./base.js";
+import { Lead, CountyConfig, makeId, formatDate, fetchWithRetry, fetchRendered } from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
 
 const HEADERS = {
@@ -83,7 +83,11 @@ async function scrapeTaxDelinquent(county: string, fromDate: string, toDate: str
   const url = urls[county] || `https://www.revenue.alabama.gov/property-tax/delinquent-property-tax-list/?county=${county}`;
 
   try {
-    const res = await fetchWithRetry(url);
+    let res = await fetchWithRetry(url);
+    if (!res.ok || res.status === 403) {
+      res = await fetchRendered(url);
+    }
+    if (!res.ok) return leads;
     const html = await res.text();
     const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
     const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
@@ -188,7 +192,10 @@ async function scrapeSheriffSales(county: string, fromDate: string, toDate: stri
     const countyUrl = countyUrls[county];
     if (countyUrl && leads.length === 0) {
       try {
-        const cRes = await fetchWithRetry(countyUrl, { headers: HEADERS });
+        let cRes = await fetchWithRetry(countyUrl, { headers: HEADERS });
+        if (!cRes.ok || cRes.status === 403) {
+          cRes = await fetchRendered(countyUrl);
+        }
         if (cRes.ok) {
           const cHtml = await cRes.text();
           const cRows = cHtml.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || [];
@@ -219,6 +226,21 @@ async function scrapeSheriffSales(county: string, fromDate: string, toDate: stri
       } catch { /* silent */ }
     }
   } catch (e) { console.error(`[AL ${county}] Sheriff Sales error:`, e); }
+
+  const CONCURRENCY = 10;
+  const needsOwner = leads.filter((l) => !l.owner_name?.trim() && l.address);
+  for (let i = 0; i < needsOwner.length; i += CONCURRENCY) {
+    const batch = needsOwner.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      batch.map((l) => lookupByAddress(l.address!, l.county, "AL")),
+    );
+    for (let j = 0; j < batch.length; j++) {
+      const prop = results[j];
+      if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
+      if (prop?.address) batch[j].address = prop.address;
+      if (prop?.zip) batch[j].zip = prop.zip;
+    }
+  }
   return leads;
 }
 // ─── Craigslist FSBO ──────────────────────────────────────────────────────────
@@ -621,19 +643,26 @@ export async function scrapeDivorce(fromDate: string, toDate: string): Promise<L
   return leads;
 }
 
-export async function scrapeAlabama(county: string, fromDate: string, toDate: string): Promise<Lead[]> {
-  // NOTE: State-wide scrapers (Bankruptcy, CodeViolations, Divorce, OutOfStateOwners, VacantAbandoned)
-  // are called ONCE per state in scrapers/index.ts — do NOT call them here (would run 8x for 8 AL counties)
-  const results = await Promise.allSettled([
-    scrapePreForeclosure(county, fromDate, toDate),
-    scrapeTaxDelinquent(county, fromDate, toDate),
-    scrapeSheriffSales(county, fromDate, toDate),
-    scrapeFSBO(county, fromDate, toDate),
-    scrapeObituaries(county, fromDate, toDate),
-    scrapeProbate(county, fromDate, toDate),
-  ]);
+export async function scrapeAlabama(
+  county: string,
+  fromDate: string,
+  toDate: string,
+  leadTypes?: string[],
+): Promise<Lead[]> {
+  const runners: Record<string, () => Promise<Lead[]>> = {
+    "Pre-Foreclosure": () => scrapePreForeclosure(county, fromDate, toDate),
+    "Tax Delinquent": () => scrapeTaxDelinquent(county, fromDate, toDate),
+    "Sheriff Sale": () => scrapeSheriffSales(county, fromDate, toDate),
+    FSBO: () => scrapeFSBO(county, fromDate, toDate),
+    Obituary: () => scrapeObituaries(county, fromDate, toDate),
+    Probate: () => scrapeProbate(county, fromDate, toDate),
+  };
+
+  const types = leadTypes?.length ? leadTypes : Object.keys(runners);
+  const fns = types.map((t) => runners[t]).filter(Boolean) as Array<() => Promise<Lead[]>>;
+  const results = await Promise.allSettled(fns.map((fn) => fn()));
 
   return results
-    .filter(r => r.status === "fulfilled")
-    .flatMap(r => (r as PromiseFulfilledResult<Lead[]>).value);
+    .filter((r) => r.status === "fulfilled")
+    .flatMap((r) => (r as PromiseFulfilledResult<Lead[]>).value);
 }

@@ -21,6 +21,7 @@
  *       Tina's config should only list Hamilton for OH until those are added.
  */
 
+import * as XLSX from "xlsx";
 import { Lead, makeId, formatDate, fetchWithRetry, fetchRendered } from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
 
@@ -137,73 +138,78 @@ async function scrapeSheriffSales(fromDate: string, toDate: string): Promise<Lea
   return leads;
 }
 
-// ─── Tax Delinquent via Hamilton County Auditor ───────────────────────────────
-// CONFIRMED WORKING: wedge1.hcauditor.org/search/re/delinquent/{year}/1
-// Returns HTML table with parcel, owner, address, city, zip, delinquent amount
+// ─── Tax Delinquent via Hamilton County Auditor XLSX ─────────────────────────
+// CONFIRMED WORKING: hcauditor.org/download/Delinquent/unpaid.xlsx (updated monthly)
 async function scrapeTaxDelinquent(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
+  const sourceUrl = "https://www.hcauditor.org/download/Delinquent/unpaid.xlsx";
   try {
-    const year = new Date().getFullYear();
-    // CONFIRMED WORKING: wedge1.hcauditor.org delinquent search
-    const url = `https://wedge1.hcauditor.org/search/re/delinquent/${year}/1`;
-    const res = await fetchWithRetry(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    const res = await fetchWithRetry(sourceUrl, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
     });
-    if (!res.ok) {
-      // Fallback: try previous year
-      const url2 = `https://wedge1.hcauditor.org/search/re/delinquent/${year - 1}/1`;
-      const res2 = await fetchWithRetry(url2, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    if (!res.ok) return leads;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const wb = XLSX.read(buf, { type: "buffer" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json<Record<string, string | number>>(sheet);
+    for (const row of rows.slice(0, 300)) {
+      const parcel = String(row.parcel_number || "").trim();
+      const owner1 = String(row.owner_name_1 || "").trim();
+      const owner2 = String(row.owner_name_2 || "").trim();
+      const owner = [owner1, owner2].filter(Boolean).join(" & ");
+      const mail1 = String(row.owner_address_1 || "").trim();
+      const mail2 = String(row.owner_address_2 || "").trim();
+      const amount = row.unpaid_amount != null ? String(row.unpaid_amount) : null;
+      if (!parcel || !owner) continue;
+      const cityZip = mail2.match(/^([^,]+),\s*([A-Z]{2})\s*(\d{5})/i);
+      leads.push({
+        id: makeId(parcel, "Hamilton", "OH", "tax"),
+        county: "Hamilton",
+        state: "OH",
+        lead_type: "Tax Delinquent",
+        owner_name: owner,
+        address: mail1 || null,
+        city: cityZip?.[1]?.trim() || "Cincinnati",
+        zip: cityZip?.[3] || null,
+        mailing_address: mail1 || null,
+        mailing_city: cityZip?.[1]?.trim() || null,
+        mailing_state: cityZip?.[2]?.trim() || "OH",
+        mailing_zip: cityZip?.[3] || null,
+        case_number: parcel,
+        filing_date: formatDate(fromDate),
+        assessed_value: null,
+        tax_year: new Date().getFullYear().toString(),
+        lender: null,
+        loan_amount: null,
+        sale_date: null,
+        sale_amount: amount,
+        description: `Tax Delinquent — Hamilton County OH${amount ? ` — $${amount}` : ""}`,
+        source_url: sourceUrl,
+        raw_data: JSON.stringify(row),
       });
-      if (!res2.ok) return leads;
-      const html2 = await res2.text();
-      return parseHamiltonDelinquentTable(html2, url2);
     }
-    const html = await res.text();
-    return parseHamiltonDelinquentTable(html, url);
+
+    const CONCURRENCY = 10;
+    const needsSitus = leads.filter((l) => l.owner_name);
+    for (let i = 0; i < needsSitus.length; i += CONCURRENCY) {
+      const batch = needsSitus.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(
+        batch.map((l) =>
+          l.address
+            ? lookupByAddress(l.address, "Hamilton", "OH")
+            : lookupOwnerProperties(l.owner_name!, "Hamilton", "OH").then((p) => p[0] || null),
+        ),
+      );
+      for (let j = 0; j < batch.length; j++) {
+        const prop = results[j];
+        if (!prop?.address) continue;
+        batch[j].address = prop.address;
+        if (prop.city) batch[j].city = prop.city;
+        if (prop.zip) batch[j].zip = prop.zip;
+      }
+    }
   } catch (e) {
     console.error("[Hamilton OH] Tax Delinquent error:", e);
-  }
-  return leads;
-}
-
-function parseHamiltonDelinquentTable(html: string, sourceUrl: string): Lead[] {
-  const leads: Lead[] = [];
-  const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-  let rowMatch;
-  while ((rowMatch = rowRe.exec(html)) !== null) {
-    const cells: string[] = [];
-    const cellRe2 = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-    let cellMatch;
-    while ((cellMatch = cellRe2.exec(rowMatch[1])) !== null) {
-      cells.push(cellMatch[1].replace(/<[^>]+>/g, '').trim());
-    }
-    if (cells.length < 2 || !cells[0]) continue;
-    // Extract parcel ID from link if present
-    const parcelMatch = rowMatch[1].match(/\/view\/re\/(\d+)\//i);
-    const parcelId = parcelMatch?.[1];
-    const owner = cells[1] || cells[0];
-    const address = cells[2] || '';
-    const city = cells[3] || 'Cincinnati';
-    const zip = cells[4] || undefined;
-    const delinqAmt = cells[5] || cells[4] || '';
-    if (!owner || /owner|name|parcel/i.test(owner)) continue;
-    leads.push({
-      id: makeId(parcelId || owner, "Hamilton", "OH", "tax"),
-      county: "Hamilton", state: "OH",
-      lead_type: "Tax Delinquent",
-      owner_name: owner,
-      address: address || null, city: city, zip: zip || null,
-      mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
-      case_number: parcelId || null,
-      filing_date: new Date().toISOString().split("T")[0],
-      assessed_value: null, tax_year: new Date().getFullYear().toString(),
-      lender: null, loan_amount: null,
-      sale_date: null, sale_amount: delinqAmt || null,
-      description: `Tax Delinquent — Hamilton County OH${delinqAmt ? ` — $${delinqAmt}` : ''}`,
-      source_url: sourceUrl,
-      raw_data: JSON.stringify(cells),
-    });
   }
   return leads;
 }
@@ -746,29 +752,36 @@ export async function scrapeOutOfStateOwners(fromDate: string, toDate: string): 
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
-export async function scrapeOhio(county: string, fromDate: string, toDate: string): Promise<Lead[]> {
-  // Currently only Hamilton (Cincinnati) has working scrapers
-  // Montgomery, Franklin, Cuyahoga, Summit need their own portal scrapers
+export async function scrapeOhio(
+  county: string,
+  fromDate: string,
+  toDate: string,
+  leadTypes?: string[],
+): Promise<Lead[]> {
   if (county !== "Hamilton") {
     console.log(`[OH] Skipping ${county} — county portal scraper not yet implemented`);
     return [];
   }
 
-  const results = await Promise.allSettled([
-    scrapePreForeclosure(fromDate, toDate),
-    scrapeSheriffSales(fromDate, toDate),
-    scrapeTaxDelinquent(fromDate, toDate),
-    scrapeProbate(fromDate, toDate),
-    scrapeFSBO(fromDate, toDate),
-    scrapeFireDamage(fromDate, toDate),
-    scrapeBankruptcy(fromDate, toDate),
-    scrapeCodeViolationsHamilton(fromDate, toDate),
-    scrapeObituaries(fromDate, toDate),
-    scrapeDivorce(fromDate, toDate),
-    scrapeVacantAbandoned(fromDate, toDate),
-  ]);
+  const runners: Record<string, () => Promise<Lead[]>> = {
+    "Pre-Foreclosure": () => scrapePreForeclosure(fromDate, toDate),
+    "Sheriff Sale": () => scrapeSheriffSales(fromDate, toDate),
+    "Tax Delinquent": () => scrapeTaxDelinquent(fromDate, toDate),
+    Probate: () => scrapeProbate(fromDate, toDate),
+    FSBO: () => scrapeFSBO(fromDate, toDate),
+    "Fire Damage": () => scrapeFireDamage(fromDate, toDate),
+    Bankruptcy: () => scrapeBankruptcy(fromDate, toDate),
+    "Code Violation": () => scrapeCodeViolationsHamilton(fromDate, toDate),
+    Obituary: () => scrapeObituaries(fromDate, toDate),
+    Divorce: () => scrapeDivorce(fromDate, toDate),
+    "Vacant Abandoned": () => scrapeVacantAbandoned(fromDate, toDate),
+  };
+
+  const types = leadTypes?.length ? leadTypes : Object.keys(runners);
+  const fns = types.map((t) => runners[t]).filter(Boolean) as Array<() => Promise<Lead[]>>;
+  const results = await Promise.allSettled(fns.map((fn) => fn()));
 
   return results
-    .filter(r => r.status === "fulfilled")
-    .flatMap(r => (r as PromiseFulfilledResult<Lead[]>).value);
+    .filter((r) => r.status === "fulfilled")
+    .flatMap((r) => (r as PromiseFulfilledResult<Lead[]>).value);
 }
