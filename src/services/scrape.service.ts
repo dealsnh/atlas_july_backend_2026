@@ -10,7 +10,7 @@ import {
 import { getDateRange, runAllScrapers } from "../scrapers/index.js";
 import type { CountyConfig } from "../scrapers/base.js";
 import { logger } from "../utils/logger.js";
-import { enrichLeads } from "./enrichment.service.js";
+import { enrichLeads, isLeadSaveable } from "./enrichment.service.js";
 import { sendDailyReport } from "./email.service.js";
 import { getEmailRecipients, getRawSettings, isSmtpReady } from "./settings.service.js";
 import { skipTraceLeadsBatch } from "./skip-trace.service.js";
@@ -102,8 +102,13 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
       logger.info({ msg }, "Enrichment progress");
     });
     let batchNew = 0;
+    let batchSkipped = 0;
     for (const lead of enriched) {
       if (savedIds.has(lead.id)) continue;
+      if (!isLeadSaveable(lead)) {
+        batchSkipped++;
+        continue;
+      }
       const isNew = await insertLeadIfNotExists(lead as unknown as Record<string, string | null>);
       if (isNew) {
         totalNew++;
@@ -114,6 +119,9 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
     }
     if (batchNew > 0) {
       lastScrapeLog.push(`✓ ${batchNew} leads saved to DB (${totalNew} total)`);
+    }
+    if (batchSkipped > 0) {
+      lastScrapeLog.push(`⚠ Skipped ${batchSkipped} leads — no assessor owner match`);
     }
   };
 

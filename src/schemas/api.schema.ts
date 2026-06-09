@@ -67,3 +67,9 @@ export const validateScrapeSchema = z.object({
   days_back: z.coerce.number().int().positive().max(90).optional(),
 });
 
+export const enrichLeadsSchema = z.object({
+  county: z.string().optional(),
+  state: z.string().length(2).optional(),
+  limit: z.coerce.number().int().positive().max(5000).optional(),
+});
+

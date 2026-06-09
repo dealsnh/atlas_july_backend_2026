@@ -311,6 +311,7 @@ export const openApiPaths = {
         },
         "400": openApiResponses.BadRequest,
         "401": openApiResponses.Unauthorized,
+        "404": openApiResponses.NotFound,
       },
     },
   },
@@ -726,6 +727,57 @@ export const openApiPaths = {
                     type: "object",
                     properties: {
                       data: { $ref: "#/components/schemas/ValidateScrapeResult" },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+        "401": openApiResponses.Unauthorized,
+      },
+    },
+  },
+  "/api/v1/admin/enrich": {
+    post: {
+      tags: ["Admin"],
+      summary: "Re-run assessor enrichment on existing leads",
+      description:
+        "Queries county assessor records for leads missing owner name, property address, or mailing address. Updates matching rows in the database.",
+      operationId: "enrichExistingLeads",
+      security: authSecurity,
+      requestBody: optBody({
+        "application/json": {
+          schema: {
+            type: "object",
+            properties: {
+              county: { type: "string" },
+              state: { type: "string", minLength: 2, maxLength: 2 },
+              limit: { type: "integer", minimum: 1, maximum: 5000, default: 500 },
+            },
+          },
+        },
+      }),
+      responses: {
+        "200": {
+          description: "Enrichment run complete",
+          content: {
+            "application/json": {
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                  {
+                    type: "object",
+                    properties: {
+                      data: {
+                        type: "object",
+                        properties: {
+                          ok: { type: "boolean" },
+                          processed: { type: "integer" },
+                          updated: { type: "integer" },
+                          stillMissingOwner: { type: "integer" },
+                        },
+                      },
                     },
                   },
                 ],

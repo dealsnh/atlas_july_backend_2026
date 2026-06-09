@@ -129,9 +129,11 @@ async function main(): Promise<void> {
     record("Historical scrape (7 days)", r.status === 200, r.message ?? "");
     console.log("\n  Waiting for scrape to finish and populate table…\n");
     await waitForScrapeIdle(1_800_000);
-  } else if (scraping) {
-    console.log("\n  Scrape already running — waiting…\n");
+  } else if (scraping && statsBefore === 0) {
+    console.log("\n  Scrape running, DB empty — waiting…\n");
     await waitForScrapeIdle(1_800_000);
+  } else if (scraping) {
+    record("Scrape in progress (skip wait)", true, `${statsBefore} leads already in table`);
   } else {
     record("Historical scrape", true, `skipped — ${statsBefore} leads already in DB`);
   }

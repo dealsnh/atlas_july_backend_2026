@@ -235,3 +235,91 @@ export async function deleteLeadsByFilter(filter: {
 
   return execute(sql, params);
 }
+
+const NEEDS_ENRICHMENT_WHERE = `
+  (owner_name IS NULL OR trim(owner_name) = '' OR length(trim(owner_name)) < 2
+   OR address IS NULL OR trim(address) = '' OR length(trim(address)) < 5
+   OR mailing_address IS NULL OR trim(mailing_address) = '')
+`;
+
+export async function countLeadsNeedingEnrichment(filter: {
+  county?: string;
+  state?: string;
+}): Promise<number> {
+  let sql = `SELECT COUNT(*)::int AS c FROM leads WHERE ${NEEDS_ENRICHMENT_WHERE}`;
+  const params: unknown[] = [];
+  let i = 1;
+  if (filter.county) {
+    sql += ` AND LOWER(county) = LOWER($${i++})`;
+    params.push(filter.county);
+  }
+  if (filter.state) {
+    sql += ` AND UPPER(state) = UPPER($${i++})`;
+    params.push(filter.state);
+  }
+  const row = await queryOne<{ c: number }>(sql, params);
+  return Number(row?.c ?? 0);
+}
+
+export async function findLeadsNeedingEnrichment(filter: {
+  county?: string;
+  state?: string;
+  limit?: number;
+}): Promise<Lead[]> {
+  let sql = `SELECT * FROM leads WHERE ${NEEDS_ENRICHMENT_WHERE}`;
+  const params: unknown[] = [];
+  let i = 1;
+  if (filter.county) {
+    sql += ` AND LOWER(county) = LOWER($${i++})`;
+    params.push(filter.county);
+  }
+  if (filter.state) {
+    sql += ` AND UPPER(state) = UPPER($${i++})`;
+    params.push(filter.state);
+  }
+  sql += ` ORDER BY scraped_at DESC LIMIT $${i}`;
+  params.push(filter.limit ?? 500);
+  return query<Lead>(sql, params);
+}
+
+export async function updateLeadEnrichment(
+  id: string,
+  lead: Pick<
+    Lead,
+    | "owner_name"
+    | "address"
+    | "city"
+    | "zip"
+    | "mailing_address"
+    | "mailing_city"
+    | "mailing_state"
+    | "mailing_zip"
+  >,
+): Promise<void> {
+  await execute(
+    `
+    UPDATE leads SET
+      owner_name       = COALESCE($1, owner_name),
+      address          = COALESCE($2, address),
+      city             = COALESCE($3, city),
+      zip              = COALESCE($4, zip),
+      mailing_address  = COALESCE($5, mailing_address),
+      mailing_city     = COALESCE($6, mailing_city),
+      mailing_state    = COALESCE($7, mailing_state),
+      mailing_zip      = COALESCE($8, mailing_zip),
+      updated_at       = NOW()
+    WHERE id = $9
+  `,
+    [
+      lead.owner_name,
+      lead.address,
+      lead.city,
+      lead.zip,
+      lead.mailing_address,
+      lead.mailing_city,
+      lead.mailing_state,
+      lead.mailing_zip,
+      id,
+    ],
+  );
+}
