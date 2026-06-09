@@ -92,26 +92,43 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
   let totalNew = 0;
   const runId = await logScrapeRun(fromDate, toDate);
 
-  try {
-    const counties = buildCountyConfigs();
-    const { leads, errors } = await runAllScrapers(counties, fromDate, toDate, (msg) => {
-      lastScrapeLog.push(msg);
-      logger.info({ msg }, "Scrape progress");
-    });
+  const newLeadIds: string[] = [];
+  const savedIds = new Set<string>();
 
-    const enrichedLeads = await enrichLeads(leads, (msg) => {
+  const saveBatch = async (batch: Parameters<typeof enrichLeads>[0]): Promise<void> => {
+    if (!batch.length) return;
+    const enriched = await enrichLeads(batch, (msg) => {
       lastScrapeLog.push(msg);
       logger.info({ msg }, "Enrichment progress");
     });
-
-    const newLeadIds: string[] = [];
-    for (const lead of enrichedLeads) {
+    let batchNew = 0;
+    for (const lead of enriched) {
+      if (savedIds.has(lead.id)) continue;
       const isNew = await insertLeadIfNotExists(lead as unknown as Record<string, string | null>);
       if (isNew) {
         totalNew++;
+        batchNew++;
         newLeadIds.push(lead.id);
+        savedIds.add(lead.id);
       }
     }
+    if (batchNew > 0) {
+      lastScrapeLog.push(`✓ ${batchNew} leads saved to DB (${totalNew} total)`);
+    }
+  };
+
+  try {
+    const counties = buildCountyConfigs();
+    const { errors } = await runAllScrapers(
+      counties,
+      fromDate,
+      toDate,
+      (msg) => {
+        lastScrapeLog.push(msg);
+        logger.info({ msg }, "Scrape progress");
+      },
+      saveBatch,
+    );
 
     await maybeAutoSkipTrace(newLeadIds, (msg) => {
       lastScrapeLog.push(msg);

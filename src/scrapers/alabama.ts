@@ -412,7 +412,7 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
         const caseName = ownerFromTitle || desc.replace(/<[^>]+>/g, "").replace(/&[a-z0-9#]+;/g, "").trim();
         bkItems.push({ title, link, pubDate, caseNum, caseName });
       }
-      const MAX_BK_ITEMS = 25;
+      const MAX_BK_ITEMS = 10;
       const itemsToProcess = bkItems.slice(0, MAX_BK_ITEMS);
       // Parallel assessor lookups across counties — 5 concurrent
       const CONCURRENCY = 5;

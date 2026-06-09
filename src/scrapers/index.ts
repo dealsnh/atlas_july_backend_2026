@@ -7,12 +7,44 @@ import * as ohio from "./ohio.js";
 import * as southCarolina from "./south_carolina.js";
 import { scrapePublicSearchLeads } from "./publicsearch-leads.js";
 
+const STATE_WIDE_TIMEOUT_MS = 90_000;
+
+async function withTimeout<T>(label: string, fn: () => Promise<T>, ms = STATE_WIDE_TIMEOUT_MS): Promise<T> {
+  return Promise.race([
+    fn(),
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms),
+    ),
+  ]);
+}
+
+async function runStateWideScrapers(
+  fns: Array<[string, () => Promise<Lead[]>]>,
+  onProgress: ((msg: string) => void) | undefined,
+  errors: string[],
+  stateLeads: Lead[],
+): Promise<void> {
+  for (const [label, fn] of fns) {
+    try {
+      onProgress?.(`Scraping ${label}...`);
+      const leads = await withTimeout(label, fn);
+      stateLeads.push(...leads);
+      onProgress?.(`✓ ${label}: ${leads.length} leads`);
+    } catch (e) {
+      const msg = `Error scraping ${label}: ${(e as Error).message}`;
+      errors.push(msg);
+      onProgress?.(`✗ ${msg}`);
+    }
+  }
+}
+
 // Run all scrapers for the configured counties
 export async function runAllScrapers(
   counties: CountyConfig[],
   fromDate: string,
   toDate: string,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  onLeadsBatch?: (leads: Lead[]) => Promise<void>,
 ): Promise<{ leads: Lead[]; errors: string[] }> {
   const allLeads: Lead[] = [];
   const errors: string[] = [];
@@ -33,6 +65,7 @@ export async function runAllScrapers(
         const leads = await missouri.scrapeAll(fromDate, toDate);
         allLeads.push(...leads);
         onProgress?.(`✓ MO: ${leads.length} leads found`);
+        if (leads.length) await onLeadsBatch?.(leads);
       } catch (e) {
         const msg = `Error scraping MO: ${(e as Error).message}`;
         errors.push(msg);
@@ -46,6 +79,7 @@ export async function runAllScrapers(
         const leads = await wisconsin.scrapeAll(fromDate, toDate);
         allLeads.push(...leads);
         onProgress?.(`✓ WI: ${leads.length} leads found`);
+        if (leads.length) await onLeadsBatch?.(leads);
       } catch (e) {
         const msg = `Error scraping WI: ${(e as Error).message}`;
         errors.push(msg);
@@ -53,6 +87,8 @@ export async function runAllScrapers(
       }
       continue;
     }
+
+    const stateLeads: Lead[] = [];
     // States with county-by-county scrapers (AL, OH, SC)
     for (const county of stateCounties) {
       try {
@@ -71,6 +107,7 @@ export async function runAllScrapers(
           continue;
         }
         allLeads.push(...leads);
+        stateLeads.push(...leads);
         onProgress?.(`✓ ${(county.name || (county as any).county || "")} ${county.state}: ${leads.length} leads`);
 
         if (county.publicsearch_slug && county.publicsearch_state) {
@@ -85,6 +122,7 @@ export async function runAllScrapers(
               toDate,
             );
             allLeads.push(...psLeads);
+            stateLeads.push(...psLeads);
             onProgress?.(`✓ publicsearch ${county.name}: ${psLeads.length} leads`);
           } catch (e) {
             const msg = `Error scraping publicsearch ${county.name}: ${(e as Error).message}`;
@@ -99,74 +137,54 @@ export async function runAllScrapers(
       }
     }
 
-    // State-wide scrapers (run once per state, after county loop)
-    // These call functions that are NOT county-specific
+    // State-wide scrapers (run once per state, after county loop) — 90s timeout each
+    const beforeWide = stateLeads.length;
     if (state === "AL") {
-      const stateWideFns: Array<[string, () => Promise<Lead[]>]> = [
-        ["AL Bankruptcy", () => alabama.scrapeBankruptcy(fromDate, toDate)],
-        ["AL Code Violations", () => alabama.scrapeCodeViolations(fromDate, toDate)],
-        ["AL Divorce/Eviction", () => alabama.scrapeDivorce(fromDate, toDate)],
-        ["AL Out-of-State Owners", () => alabama.scrapeOutOfStateOwners(fromDate, toDate)],
-        ["AL Vacant/Abandoned", () => alabama.scrapeVacantAbandoned(fromDate, toDate)],
-      ];
-      for (const [label, fn] of stateWideFns) {
-        try {
-          onProgress?.(`Scraping ${label}...`);
-          const leads = await fn();
-          allLeads.push(...leads);
-          onProgress?.(`✓ ${label}: ${leads.length} leads`);
-        } catch (e) {
-          const msg = `Error scraping ${label}: ${(e as Error).message}`;
-          errors.push(msg);
-          onProgress?.(`✗ ${msg}`);
-        }
-      }
+      await runStateWideScrapers(
+        [
+          ["AL Bankruptcy", () => alabama.scrapeBankruptcy(fromDate, toDate)],
+          ["AL Code Violations", () => alabama.scrapeCodeViolations(fromDate, toDate)],
+          ["AL Divorce/Eviction", () => alabama.scrapeDivorce(fromDate, toDate)],
+          ["AL Out-of-State Owners", () => alabama.scrapeOutOfStateOwners(fromDate, toDate)],
+          ["AL Vacant/Abandoned", () => alabama.scrapeVacantAbandoned(fromDate, toDate)],
+        ],
+        onProgress,
+        errors,
+        stateLeads,
+      );
+    } else if (state === "OH") {
+      await runStateWideScrapers(
+        [
+          ["OH Bankruptcy", () => ohio.scrapeBankruptcy(fromDate, toDate)],
+          ["OH Obituaries", () => ohio.scrapeObituaries(fromDate, toDate)],
+          ["OH Code Violations", () => ohio.scrapeCodeViolations(fromDate, toDate)],
+          ["OH Divorce/Eviction", () => ohio.scrapeDivorce(fromDate, toDate)],
+          ["OH Out-of-State Owners", () => ohio.scrapeOutOfStateOwners(fromDate, toDate)],
+          ["OH Vacant/Abandoned", () => ohio.scrapeVacantAbandoned(fromDate, toDate)],
+        ],
+        onProgress,
+        errors,
+        stateLeads,
+      );
+    } else if (state === "SC") {
+      await runStateWideScrapers(
+        [
+          ["SC Bankruptcy", () => southCarolina.scrapeBankruptcy(fromDate, toDate)],
+          ["SC Obituaries", () => southCarolina.scrapeObituaries(fromDate, toDate)],
+          ["SC FSBO", () => southCarolina.scrapeFSBO(fromDate, toDate)],
+          ["SC Code Violations", () => southCarolina.scrapeCodeViolations(fromDate, toDate)],
+          ["SC Divorce/Eviction", () => southCarolina.scrapeDivorce(fromDate, toDate)],
+          ["SC Out-of-State Owners", () => southCarolina.scrapeOutOfStateOwners(fromDate, toDate)],
+          ["SC Vacant/Abandoned", () => southCarolina.scrapeVacantAbandoned(fromDate, toDate)],
+        ],
+        onProgress,
+        errors,
+        stateLeads,
+      );
     }
-    if (state === "OH") {
-      const stateWideFns: Array<[string, () => Promise<Lead[]>]> = [
-        ["OH Bankruptcy", () => ohio.scrapeBankruptcy(fromDate, toDate)],
-        ["OH Obituaries", () => ohio.scrapeObituaries(fromDate, toDate)],
-        ["OH Code Violations", () => ohio.scrapeCodeViolations(fromDate, toDate)],
-        ["OH Divorce/Eviction", () => ohio.scrapeDivorce(fromDate, toDate)],
-        ["OH Out-of-State Owners", () => ohio.scrapeOutOfStateOwners(fromDate, toDate)],
-        ["OH Vacant/Abandoned", () => ohio.scrapeVacantAbandoned(fromDate, toDate)],
-      ];
-      for (const [label, fn] of stateWideFns) {
-        try {
-          onProgress?.(`Scraping ${label}...`);
-          const leads = await fn();
-          allLeads.push(...leads);
-          onProgress?.(`✓ ${label}: ${leads.length} leads`);
-        } catch (e) {
-          const msg = `Error scraping ${label}: ${(e as Error).message}`;
-          errors.push(msg);
-          onProgress?.(`✗ ${msg}`);
-        }
-      }
-    }
-    if (state === "SC") {
-      const stateWideFns: Array<[string, () => Promise<Lead[]>]> = [
-        ["SC Bankruptcy", () => southCarolina.scrapeBankruptcy(fromDate, toDate)],
-        ["SC Obituaries", () => southCarolina.scrapeObituaries(fromDate, toDate)],
-        ["SC FSBO", () => southCarolina.scrapeFSBO(fromDate, toDate)],
-        ["SC Code Violations", () => southCarolina.scrapeCodeViolations(fromDate, toDate)],
-        ["SC Divorce/Eviction", () => southCarolina.scrapeDivorce(fromDate, toDate)],
-        ["SC Out-of-State Owners", () => southCarolina.scrapeOutOfStateOwners(fromDate, toDate)],
-        ["SC Vacant/Abandoned", () => southCarolina.scrapeVacantAbandoned(fromDate, toDate)],
-      ];
-      for (const [label, fn] of stateWideFns) {
-        try {
-          onProgress?.(`Scraping ${label}...`);
-          const leads = await fn();
-          allLeads.push(...leads);
-          onProgress?.(`✓ ${label}: ${leads.length} leads`);
-        } catch (e) {
-          const msg = `Error scraping ${label}: ${(e as Error).message}`;
-          errors.push(msg);
-          onProgress?.(`✗ ${msg}`);
-        }
-      }
-    }
+    allLeads.push(...stateLeads.slice(beforeWide));
+
+    if (stateLeads.length) await onLeadsBatch?.(stateLeads);
   }
 
   return { leads: allLeads, errors };
