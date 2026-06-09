@@ -15,7 +15,8 @@
     "seed": "tsx src/scripts/seed-csvs.ts",
     "test:mo-scraper": "tsx src/scripts/test-mo-scraper.ts",
     "test:flow": "tsx src/scripts/test-flow.ts",
-    "test:live": "tsx src/scripts/live-e2e-test.ts"
+    "test:live": "tsx src/scripts/live-e2e-test.ts",
+    "test:frontend": "tsx src/scripts/frontend-e2e-test.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
