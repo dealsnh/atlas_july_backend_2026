@@ -222,9 +222,10 @@ export async function validateCountyScrape(params: {
   state: string;
   from_date: string;
   to_date: string;
-  leads: Awaited<ReturnType<typeof enrichLeads>>;
+  sample: Awaited<ReturnType<typeof enrichLeads>>;
   errors: string[];
   total: number;
+  saveable: number;
   by_type: Record<string, number>;
 }> {
   const daysBack = Math.min(params.days_back ?? 7, 90);
@@ -247,8 +248,12 @@ export async function validateCountyScrape(params: {
   }
 
   const { leads, errors } = await runAllScrapers([countyConfig], fromDate, toDate);
-  const enriched = await enrichLeads(leads);
   const countyNorm = params.county.toLowerCase();
+  const countyLeads = leads.filter((l) => l.county.toLowerCase() === countyNorm);
+  const capped = params.lead_type
+    ? countyLeads.filter((l) => l.lead_type === params.lead_type).slice(0, 100)
+    : countyLeads.slice(0, 100);
+  const enriched = await enrichLeads(capped);
   const filtered = enriched.filter((l) => {
     if (l.county.toLowerCase() !== countyNorm) return false;
     if (params.lead_type && l.lead_type !== params.lead_type) return false;
@@ -260,14 +265,16 @@ export async function validateCountyScrape(params: {
     by_type[lead.lead_type] = (by_type[lead.lead_type] ?? 0) + 1;
   }
 
+  const saveable = filtered.filter(isLeadSaveable).length;
   return {
     county: params.county,
     state: params.state,
     from_date: fromDate,
     to_date: toDate,
-    leads: filtered,
+    sample: filtered.slice(0, 5),
     errors,
     total: filtered.length,
+    saveable,
     by_type,
   };
 }

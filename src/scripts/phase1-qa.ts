@@ -59,8 +59,9 @@ async function validateCase(token: string, c: Case): Promise<{
   let body: {
     data?: {
       total?: number;
+      saveable?: number;
       errors?: string[];
-      leads?: { owner_name?: string | null }[];
+      sample?: { owner_name?: string | null }[];
     };
   } = {};
   try {
@@ -68,9 +69,10 @@ async function validateCase(token: string, c: Case): Promise<{
   } catch {
     throw new Error(raw.slice(0, 120) || `HTTP ${res.status}`);
   }
-  const leads = body.data?.leads ?? [];
-  const total = body.data?.total ?? leads.length;
-  const saveable = leads.filter((l) => (l.owner_name || "").trim().length >= 2).length;
+  const total = body.data?.total ?? 0;
+  const saveable =
+    body.data?.saveable ??
+    (body.data?.sample ?? []).filter((l) => (l.owner_name || "").trim().length >= 2).length;
   const errors = body.data?.errors?.length ?? 0;
   const pass = res.ok && (saveable > 0 || total > 0);
   return { total, saveable, errors, ms: Date.now() - t0, pass };

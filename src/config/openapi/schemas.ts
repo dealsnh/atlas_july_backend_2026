@@ -252,16 +252,20 @@ export const openApiSchemas = {
       from_date: { type: "string", format: "date" },
       to_date: { type: "string", format: "date" },
       total: { type: "integer" },
+      saveable: {
+        type: "integer",
+        description: "Leads with assessor-verified owner (would be persisted)",
+      },
       by_type: {
         type: "object",
         additionalProperties: { type: "integer" },
         description: "Lead counts grouped by lead_type",
       },
       errors: { type: "array", items: { type: "string" } },
-      leads: {
+      sample: {
         type: "array",
         items: { $ref: "#/components/schemas/Lead" },
-        description: "Sample leads (dry run — not persisted)",
+        description: "Up to 5 sample leads (dry run — not persisted)",
       },
     },
   },
