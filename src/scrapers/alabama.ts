@@ -6,6 +6,7 @@
 
 import { Lead, CountyConfig, makeId, formatDate, fetchWithRetry, fetchRendered } from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
+import * as XLSX from "xlsx";
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -71,8 +72,142 @@ async function scrapePreForeclosure(county: string, fromDate: string, toDate: st
   return leads;
 }
 
+// ─── Madison AL tax certificates (county XLSX — direct download) ─────────────
+const MADISON_CERT_XLSX = "https://madisontc.com/s/MadisonCountyCertificates-tshc.xlsx";
+
+function trimCell(v: unknown): string {
+  return String(v ?? "").replace(/\s+/g, " ").trim();
+}
+
+function madisonRowAddress(row: Record<string, unknown>): string | null {
+  const house = trimCell(row["Location House #"]);
+  const street = trimCell(row["Location Address"]);
+  const city = trimCell(row["Location City"]);
+  const core = [house, street].filter((p) => p && /\S/.test(p)).join(" ").trim() || street;
+  if (!core) return null;
+  return city ? `${core}, ${city}` : core;
+}
+
+function excelDateToIso(value: unknown): string | null {
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return value.toISOString().split("T")[0];
+  }
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed) {
+      return `${parsed.y}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
+    }
+  }
+  return formatDate(String(value ?? ""));
+}
+
+async function fetchMadisonCertificateRows(): Promise<Record<string, unknown>[]> {
+  try {
+    const res = await fetchWithRetry(MADISON_CERT_XLSX, {
+      headers: {
+        ...HEADERS,
+        Accept: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,*/*",
+      },
+    });
+    if (!res.ok) return [];
+    const buf = Buffer.from(await res.arrayBuffer());
+    const wb = XLSX.read(buf, { type: "buffer", cellDates: true });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(sheet) as Record<string, unknown>[];
+  } catch {
+    return [];
+  }
+}
+
+async function scrapeMadisonTaxDelinquent(fromDate: string, toDate: string): Promise<Lead[]> {
+  const leads: Lead[] = [];
+  const rows = await fetchMadisonCertificateRows();
+  for (const row of rows) {
+    if (trimCell(row["Paid Status"]) !== "U") continue;
+    const owner = trimCell(row["Name"]);
+    const parcel = trimCell(row["Parcel"]);
+    if (!owner || !parcel) continue;
+    const address = madisonRowAddress(row);
+    const city = trimCell(row["Location City"]) || "Huntsville";
+    const amount = row["Unpaid Bal"] != null ? String(row["Unpaid Bal"]) : null;
+    const taxYear = row["Tax Year"] != null ? String(row["Tax Year"]) : new Date().getFullYear().toString();
+    leads.push({
+      id: makeId(parcel, "Madison", "AL", "tax"),
+      county: "Madison",
+      state: "AL",
+      lead_type: "Tax Delinquent",
+      owner_name: owner,
+      address,
+      city,
+      zip: null,
+      mailing_address: trimCell(row["Address"]) || null,
+      mailing_city: trimCell(row["City"]) || null,
+      mailing_state: trimCell(row["St"]) || "AL",
+      mailing_zip: row["Zip"] != null ? String(row["Zip"]).slice(0, 5) : null,
+      case_number: trimCell(row["Cert #"]) || parcel,
+      filing_date: formatDate(fromDate),
+      assessed_value: row["Assessed Value"] != null ? String(row["Assessed Value"]) : null,
+      tax_year: taxYear,
+      lender: null,
+      loan_amount: null,
+      sale_date: excelDateToIso(row["Sale Date"]),
+      sale_amount: amount,
+      description: `Tax Delinquent — Madison County AL${amount ? ` — $${amount}` : ""}`,
+      source_url: MADISON_CERT_XLSX,
+      raw_data: JSON.stringify({ parcel, owner, amount, taxYear }),
+    });
+    if (leads.length >= 100) break;
+  }
+  return leads;
+}
+
+async function scrapeMadisonSheriffSales(fromDate: string, toDate: string): Promise<Lead[]> {
+  const leads: Lead[] = [];
+  const rows = await fetchMadisonCertificateRows();
+  for (const row of rows) {
+    if (trimCell(row["Paid Status"]) !== "U") continue;
+    const owner = trimCell(row["Name"]);
+    const parcel = trimCell(row["Parcel"]);
+    const saleDate = excelDateToIso(row["Sale Date"]);
+    if (!owner || !parcel || !saleDate) continue;
+    const address = madisonRowAddress(row);
+    const amount = row["Cert. Face Amt"] != null ? String(row["Cert. Face Amt"]) : null;
+    leads.push({
+      id: makeId(parcel, "Madison", "AL", "sheriff"),
+      county: "Madison",
+      state: "AL",
+      lead_type: "Sheriff Sale",
+      owner_name: owner,
+      address,
+      city: trimCell(row["Location City"]) || "Huntsville",
+      zip: null,
+      mailing_address: trimCell(row["Address"]) || null,
+      mailing_city: trimCell(row["City"]) || null,
+      mailing_state: trimCell(row["St"]) || "AL",
+      mailing_zip: row["Zip"] != null ? String(row["Zip"]).slice(0, 5) : null,
+      case_number: trimCell(row["Cert #"]) || parcel,
+      filing_date: saleDate,
+      assessed_value: null,
+      tax_year: row["Tax Year"] != null ? String(row["Tax Year"]) : null,
+      lender: trimCell(row["Cert Holder"]) || null,
+      loan_amount: null,
+      sale_date: saleDate,
+      sale_amount: amount,
+      description: `Tax certificate sale — Madison County AL — ${address || parcel}`,
+      source_url: MADISON_CERT_XLSX,
+      raw_data: JSON.stringify({ parcel, owner, saleDate, amount }),
+    });
+    if (leads.length >= 100) break;
+  }
+  return leads;
+}
+
 // ─── Tax Delinquent via Alabama Revenue Commissioner sites ────────────────────
 async function scrapeTaxDelinquent(county: string, fromDate: string, toDate: string): Promise<Lead[]> {
+  if (county === "Madison") {
+    const madison = await scrapeMadisonTaxDelinquent(fromDate, toDate);
+    if (madison.length) return madison;
+  }
   const leads: Lead[] = [];
   const urls: Record<string, string> = {
     Jefferson: "https://www.jeffcointouch.com/revenue/delinquent-tax-list",
@@ -162,6 +297,10 @@ async function scrapeTaxDelinquent(county: string, fromDate: string, toDate: str
 // Returns property address + case info. Owner enrichment via JCCAL (Jefferson) or ATTOM.
 async function scrapeSheriffSales(county: string, fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
+  if (county === "Madison") {
+    const madison = await scrapeMadisonSheriffSales(fromDate, toDate);
+    if (madison.length) return madison;
+  }
   try {
     // Rubin Lublin — primary AL foreclosure/sheriff sale attorney, covers all counties
     const url = 'https://rubinlublin.com/foreclosure-listings/';

@@ -431,48 +431,97 @@ async function lookupMontgomeryAL(ownerName: string): Promise<AssessorProperty[]
 // Ohio Counties
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ─── Hamilton County OH: wedge1.hcauditor.org ────────────────────────────────
-// CONFIRMED WORKING: wedge1.hcauditor.org/search/re/owner/{name}/1 returns HTML table
-// wedge1.hcauditor.org/view/re/{parcel}/2025/summary returns owner + address for a parcel
+// ─── Hamilton County OH: wedge.hcauditor.org (DevNet portal) ─────────────────
+// Legacy wedge1.hcauditor.org/search/re/* URLs return 404 (2025+).
+// Flow: session cookie → POST /execute → POST /results_ajax (JSON owner + address).
+const HAMILTON_WEDGE_BASE = 'https://wedge.hcauditor.org';
+
+function mergeSetCookies(res: Response): string {
+  if (typeof res.headers.getSetCookie === 'function') {
+    return res.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
+  }
+  const raw = res.headers.get('set-cookie');
+  if (!raw) return '';
+  return raw.split(',').map((c) => c.split(';')[0].trim()).join('; ');
+}
+
+function stripStreetSuffix(street: string): string {
+  return street
+    .replace(/\s+(ST|STREET|DR|DRIVE|AVE|AVENUE|LN|LANE|RD|ROAD|CT|COURT|BLVD|WAY|PL|PLACE|CIR|CIRCLE)\.?$/i, '')
+    .trim();
+}
+
+interface WedgeParcelRow {
+  property_key?: string;
+  owner?: string;
+  site_address?: string;
+  masked_property_key?: string;
+}
+
+async function queryHamiltonWedge(params: {
+  searchType: 'Address' | 'Owner';
+  houseNumber?: string;
+  streetName?: string;
+  ownerBegins?: string;
+}): Promise<WedgeParcelRow[]> {
+  const init = await fetchWithRetry(`${HAMILTON_WEDGE_BASE}/`);
+  let cookies = mergeSetCookies(init);
+  const postHeaders: Record<string, string> = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'X-Requested-With': 'XMLHttpRequest',
+    Accept: 'application/json, text/javascript, */*; q=0.01',
+  };
+  if (cookies) postHeaders.Cookie = cookies;
+
+  const body = new URLSearchParams();
+  body.set('search_method', params.searchType);
+  body.set('search_type', params.searchType);
+  if (params.searchType === 'Address') {
+    if (!params.houseNumber || !params.streetName) return [];
+    body.set('site_house_number_low', params.houseNumber);
+    body.set('site_street_name', stripStreetSuffix(params.streetName));
+  } else {
+    if (!params.ownerBegins?.trim()) return [];
+    body.set('owner_name_begins', params.ownerBegins.trim());
+  }
+
+  const exec = await fetchWithRetry(`${HAMILTON_WEDGE_BASE}/execute`, {
+    method: 'POST',
+    headers: postHeaders,
+    body: body.toString(),
+  });
+  const extra = mergeSetCookies(exec);
+  if (extra) cookies = [cookies, extra].filter(Boolean).join('; ');
+  const execData = (await exec.json().catch(() => ({}))) as { Message?: string };
+  if (execData.Message) return [];
+
+  const ajax = await fetchWithRetry(`${HAMILTON_WEDGE_BASE}/results_ajax`, {
+    method: 'POST',
+    headers: { ...postHeaders, ...(cookies ? { Cookie: cookies } : {}) },
+    body: 'draw=1&start=0&length=25',
+  });
+  const ajaxData = (await ajax.json().catch(() => ({}))) as { data?: WedgeParcelRow[] };
+  return Array.isArray(ajaxData.data) ? ajaxData.data : [];
+}
+
+function mapWedgeRows(rows: WedgeParcelRow[]): AssessorProperty[] {
+  return rows
+    .filter((r) => r.site_address && r.owner)
+    .map((r) => ({
+      address: r.site_address!.trim(),
+      city: 'Cincinnati',
+      state: 'OH',
+      parcelId: r.property_key || r.masked_property_key || undefined,
+      ownerName: r.owner!.trim(),
+    }));
+}
+
 async function lookupHamiltonOH(ownerName: string): Promise<AssessorProperty[]> {
   try {
-    const clean = cleanName(ownerName);
-    const lastName = clean.split(/\s+/).pop() || clean;
-    // CONFIRMED WORKING endpoint: search by owner last name
-    const searchUrl = `https://wedge1.hcauditor.org/search/re/owner/${encodeURIComponent(lastName)}/1`;
-    const res = await fetchWithRetry(searchUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-    });
-    if (!res.ok) return [];
-    const html = await res.text();
-    const results: AssessorProperty[] = [];
-    // Parse results table — columns: parcel, owner, address, city, zip
-    const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-    const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-    let rowMatch;
-    while ((rowMatch = rowRe.exec(html)) !== null) {
-      const cells: string[] = [];
-      let cellMatch;
-      const cellRe2 = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-      while ((cellMatch = cellRe2.exec(rowMatch[1])) !== null) {
-        cells.push(cellMatch[1].replace(/<[^>]+>/g, '').trim());
-      }
-      if (cells.length < 3) continue;
-      // Extract parcel ID from link if present
-      const parcelMatch = rowMatch[1].match(/\/view\/re\/([\d]+)\//i);
-      const parcelId = parcelMatch?.[1];
-      const addr = cells[2] || cells[1] || '';
-      if (!addr || !/\d+\s+[A-Za-z]/.test(addr)) continue;
-      results.push({
-        address: addr,
-        city: cells[3] || 'Cincinnati',
-        state: 'OH',
-        zip: cells[4] || undefined,
-        parcelId: parcelId || undefined,
-        ownerName: cells[1] || undefined,
-      });
-    }
-    return results;
+    const { last, first } = parseName(ownerName);
+    const ownerBegins = first ? `${last} ${first.charAt(0)}` : last;
+    const rows = await queryHamiltonWedge({ searchType: 'Owner', ownerBegins });
+    return mapWedgeRows(rows);
   } catch {
     return [];
   }
@@ -820,36 +869,13 @@ export async function lookupByAddress(
         }
       }
     } else if (state === 'OH' && countyKey === 'hamilton') {
-      // Hamilton OH — wedge1.hcauditor.org address search
-      const searchUrl = `https://wedge1.hcauditor.org/search/re/address/${encodeURIComponent(addrClean)}/1`;
-      const res = await fetchWithRetry(searchUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      const rows = await queryHamiltonWedge({
+        searchType: 'Address',
+        houseNumber: streetNum,
+        streetName: parts.slice(1).join(' ') || streetName,
       });
-      if (res.ok) {
-        const html = await res.text();
-        const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-        let rowMatch;
-        while ((rowMatch = rowRe.exec(html)) !== null) {
-          const cells: string[] = [];
-          const cr = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-          let cellMatch;
-          while ((cellMatch = cr.exec(rowMatch[1])) !== null) {
-            cells.push(cellMatch[1].replace(/<[^>]+>/g, '').trim());
-          }
-          if (cells.length < 3) continue;
-          const addr = cells[2] || cells[1] || '';
-          if (!addr || !/\d+\s+[A-Za-z]/.test(addr)) continue;
-          const parcelMatch = rowMatch[1].match(/\/view\/re\/(\d+)\//i);
-          return {
-            address: addr,
-            city: cells[3] || 'Cincinnati',
-            state: 'OH',
-            zip: cells[4] || undefined,
-            parcelId: parcelMatch?.[1] || undefined,
-            ownerName: cells[1] || undefined,
-          };
-        }
-      }
+      const match = mapWedgeRows(rows)[0];
+      if (match) return match;
     } else if (state === 'AL') {
       // Jefferson AL — JCCAL ArcGIS
       if (countyKey === 'jefferson') {
