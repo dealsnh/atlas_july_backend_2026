@@ -52,8 +52,7 @@ const SKIP_SCRAPER_PATTERNS = [
   "madisontc.com", // Madison AL tax certificate XLSX
   "sheriffclayco.org", // Clay MO sheriff property sales
   "claycountymo.tax", // Clay MO collector tax sale
-  "plattecountycollector.com", // Platte MO collector
-  "plattesheriff.org", // Platte MO sheriff
+  "plattecountycollector.com", // Platte MO collector — weak TLS; use fetchBlockedPage
   "casscounty.com", // Cass MO
   "rubinlublin.com", // AL statewide foreclosure listings (legacy)
   "rlselaw.com", // Rubin Lublin AL property listings
@@ -153,6 +152,63 @@ export async function fetchRendered(url: string, retries = 2): Promise<Response>
     }
   }
   throw new Error(`fetchRendered failed after ${retries} retries: ${url}`);
+}
+
+function looksBlocked(html: string): boolean {
+  if (!html || html.length < 150) return true;
+  return /403 Forbidden|Access Denied|cf-browser-verification|Just a moment/i.test(html);
+}
+
+/**
+ * fetchBlockedPage — direct fetch, then ScraperAPI proxy + render for sites that
+ * block datacenter IPs (e.g. Platte sheriff, Craigslist on Railway).
+ */
+export async function fetchBlockedPage(url: string, options: RequestInit = {}): Promise<string> {
+  const SCRAPER_KEY = process.env.SCRAPER_API_KEY;
+  let html = "";
+
+  try {
+    const res = await fetchWithRetry(url, options);
+    if (res.ok) html = await res.text();
+  } catch {
+    /* try proxy */
+  }
+  if (html && !looksBlocked(html)) return html;
+
+  if (SCRAPER_KEY) {
+    try {
+      const proxyUrl = `http://api.scraperapi.com?api_key=${SCRAPER_KEY}&url=${encodeURIComponent(url)}&render=false`;
+      const headers = {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        ...(options.headers as Record<string, string>),
+      };
+      const init: RequestInit = { headers, signal: AbortSignal.timeout(60000) };
+      if (options.method && options.method !== "GET") {
+        init.method = options.method;
+        init.body = options.body;
+      }
+      const res = await fetch(proxyUrl, init);
+      if (res.ok) {
+        const t = await res.text();
+        if (t && !looksBlocked(t)) return t;
+      }
+    } catch {
+      /* try rendered */
+    }
+
+    try {
+      const rendered = await fetchRendered(url);
+      if (rendered.ok) {
+        const t = await rendered.text();
+        if (t && !looksBlocked(t)) return t;
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+
+  return html;
 }
 
 /**

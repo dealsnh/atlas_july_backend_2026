@@ -20,7 +20,15 @@
 import * as cheerio from "cheerio";
 import { PDFParse } from "pdf-parse";
 import { filterLeadsByTypes, normalizeLeadTypes } from "../config/county-lead-types.js";
-import { Lead, makeId, formatDate, fetchWithRetry, fetchRendered, CountyConfig } from "./base.js";
+import {
+  Lead,
+  makeId,
+  formatDate,
+  fetchWithRetry,
+  fetchRendered,
+  fetchBlockedPage,
+  CountyConfig,
+} from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
 
 const STATE = "MO";
@@ -470,6 +478,241 @@ async function scrapeJacksonProbate(fromDate: string, toDate: string): Promise<L
   return leads;
 }
 
+const PLATTE_ZIPS = new Set([
+  "64048",
+  "64058",
+  "64068",
+  "64079",
+  "64098",
+  "64150",
+  "64151",
+  "64152",
+  "64153",
+  "64154",
+  "64155",
+  "64156",
+  "64157",
+  "64158",
+  "64163",
+  "64164",
+  "64165",
+  "64166",
+  "64167",
+  "64168",
+  "64190",
+]);
+
+function parseMOCaseOwner(caseName: string): string | null {
+  const n = caseName.replace(/\s+/g, " ").trim();
+  if (!n || /case|number|style|search/i.test(n)) return null;
+  const fromEstate = n
+    .match(/(?:Estate|In re|In the Estate)\s+(?:of\s+)?(.+?)(?:,|\s+Deceased|\s+Dec'?d|$)/i)?.[1]
+    ?.trim();
+  if (fromEstate && fromEstate.length >= 2) return fromEstate;
+  const fromVs = n.split(/\s+v\.?\s+/i);
+  if (fromVs.length > 1) {
+    const defendant = fromVs[1].split(",")[0].trim();
+    if (defendant.length >= 2) return defendant;
+  }
+  const plain = n.split(",")[0].trim();
+  return plain.length >= 2 ? plain : null;
+}
+
+function appendCraigslistFsboLeads(
+  leads: Lead[],
+  html: string,
+  county: string,
+  sourceUrl: string,
+  fromDate: string,
+  defaultCity: string,
+): void {
+  const $ = cheerio.load(html);
+  $("li.cl-static-search-result, li.result-row, .cl-search-result").each((_, el) => {
+    const title = $(el)
+      .find(".title, .result-title, a.posting-title, .title-blob")
+      .first()
+      .text()
+      .trim();
+    const price = $(el).find(".price, .result-price, .priceinfo").first().text().trim();
+    const date = $(el).find("time").attr("datetime") || "";
+    const link = $(el).find("a").first().attr("href") || "";
+    if (!title) return;
+    leads.push({
+      id: makeId(county, STATE, "FSBO", link || title),
+      county,
+      state: STATE,
+      lead_type: "FSBO",
+      owner_name: "FSBO Seller",
+      address: title,
+      city: defaultCity,
+      zip: null,
+      mailing_address: null,
+      mailing_city: null,
+      mailing_state: null,
+      mailing_zip: null,
+      case_number: null,
+      filing_date: formatDate(date || fromDate),
+      assessed_value: null,
+      tax_year: null,
+      lender: null,
+      loan_amount: null,
+      sale_date: null,
+      sale_amount: price.replace(/[^\d.]/g, "") || null,
+      description: title,
+      source_url: link.startsWith("http") ? link : `https://kansascity.craigslist.org${link}`,
+      raw_data: JSON.stringify({ title, price, sourceUrl }),
+    });
+  });
+}
+
+async function scrapePlatteCaseNet(
+  caseType: string,
+  leadType: string,
+  fromDate: string,
+  toDate: string,
+): Promise<Lead[]> {
+  const COUNTY = "Platte";
+  const leads: Lead[] = [];
+  const url = "https://www.courts.mo.gov/casenet/cases/searchCases.do";
+  const body = new URLSearchParams({
+    countyCode: "25",
+    caseType,
+    fromDate,
+    toDate,
+    submit: "Search",
+  }).toString();
+
+  const html = await fetchBlockedPage(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!html) return leads;
+
+  const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
+  const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+  for (const row of html.match(rowRe) || []) {
+    const cells: string[] = [];
+    let m;
+    while ((m = cellRe.exec(row)) !== null) {
+      cells.push(m[1].replace(/<[^>]+>/g, "").trim());
+    }
+    cellRe.lastIndex = 0;
+    if (cells.length < 2 || !cells[0] || cells[0].toLowerCase().includes("case")) continue;
+
+    const caseNum = cells[0];
+    const caseName = cells[1];
+    const filedDate = cells[2] || fromDate;
+    const owner = parseMOCaseOwner(caseName);
+    if (!owner) continue;
+
+    leads.push({
+      id: makeId(COUNTY, STATE, leadType, `${caseNum}-${owner}`),
+      county: COUNTY,
+      state: STATE,
+      lead_type: leadType,
+      owner_name: owner,
+      address: null,
+      city: "Platte City",
+      zip: null,
+      mailing_address: null,
+      mailing_city: null,
+      mailing_state: null,
+      mailing_zip: null,
+      case_number: caseNum,
+      filing_date: formatDate(filedDate),
+      assessed_value: null,
+      tax_year: null,
+      lender: null,
+      loan_amount: null,
+      sale_date: null,
+      sale_amount: null,
+      description: `Platte County MO ${leadType} — ${caseName}`,
+      source_url: url,
+      raw_data: JSON.stringify({ caseNum, caseName, filedDate }),
+    });
+  }
+  return leads;
+}
+
+async function scrapePlatteBankruptcy(fromDate: string, toDate: string): Promise<Lead[]> {
+  const COUNTY = "Platte";
+  const leads: Lead[] = [];
+  try {
+    const rss = await fetchWithRetry("https://ecf.mowb.uscourts.gov/cgi-bin/rss_outside.pl");
+    if (!rss.ok) return leads;
+    const xml = await rss.text();
+    const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+    type BkItem = { caseNum: string; caseName: string; pubDate: string; link: string };
+    const bkItems: BkItem[] = [];
+
+    for (const item of items) {
+      const title =
+        (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) ||
+          item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
+      const link = item.match(/<link>(.+?)<\/link>/)?.[1]?.trim() || "";
+      const pubDate = item.match(/<pubDate>(.+?)<\/pubDate>/)?.[1]?.trim() || "";
+      const caseNum = title.match(/([0-9]{2}-[0-9]{5})/)?.[1] || title;
+      const caseName = title.replace(/^[0-9]{2}-[0-9]{5}(-[a-zA-Z0-9]+)?\s*/, "").trim();
+      if (pubDate) {
+        const d = new Date(pubDate);
+        if (!isNaN(d.getTime())) {
+          const from = new Date(fromDate);
+          const to = new Date(toDate);
+          to.setHours(23, 59, 59, 999);
+          if (d < from || d > to) continue;
+        }
+      }
+      if (caseName.length >= 2) bkItems.push({ caseNum, caseName, pubDate, link });
+    }
+
+    const CONCURRENCY = 5;
+    for (let i = 0; i < Math.min(bkItems.length, 30); i += CONCURRENCY) {
+      const batch = bkItems.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(
+        batch.map((b) => lookupOwnerProperties(b.caseName, COUNTY, STATE)),
+      );
+      for (let j = 0; j < batch.length; j++) {
+        const { caseNum, caseName, pubDate, link } = batch[j];
+        const platteProps = results[j].filter((p) => p.zip && PLATTE_ZIPS.has(p.zip.slice(0, 5)));
+        if (!platteProps.length) continue;
+        for (const prop of platteProps) {
+          leads.push({
+            id: makeId(COUNTY, STATE, "Bankruptcy", `${caseNum}-${prop.address}`),
+            county: COUNTY,
+            state: STATE,
+            lead_type: "Bankruptcy",
+            owner_name: prop.ownerName || caseName,
+            address: prop.address,
+            city: prop.city || "Platte City",
+            zip: prop.zip || null,
+            mailing_address: null,
+            mailing_city: null,
+            mailing_state: null,
+            mailing_zip: null,
+            case_number: caseNum,
+            filing_date: pubDate
+              ? formatDate(new Date(pubDate).toISOString().slice(0, 10))
+              : formatDate(fromDate),
+            assessed_value: null,
+            tax_year: null,
+            lender: null,
+            loan_amount: null,
+            sale_date: null,
+            sale_amount: null,
+            description: `Platte County MO Bankruptcy — ${caseName}`,
+            source_url: link || "https://ecf.mowb.uscourts.gov/cgi-bin/rss_outside.pl",
+            raw_data: JSON.stringify({ caseNum, caseName, pubDate, parcelId: prop.parcelId }),
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[Platte MO] Bankruptcy error:", e);
+  }
+  return leads;
+}
+
 function parseSheriffNoticeText(
   noticeHtml: string,
   county: string,
@@ -596,13 +839,8 @@ async function scrapePlatteCounty(fromDate: string, toDate: string): Promise<Lea
   const COUNTY = "Platte";
   try {
     const sheriffUrl = "https://www.plattesheriff.org/community-resources/sheriffs-property-sales/";
-    let res = await fetchWithRetry(sheriffUrl);
-    let html = res.ok ? await res.text() : "";
-    if (!/Notice of Sheriff/i.test(html)) {
-      const rendered = await fetchRendered(sheriffUrl);
-      if (rendered.ok) html = await rendered.text();
-    }
-    for (const chunk of html.split(/Notice of Sheriff'?s? Sale/i).slice(1)) {
+    const sheriffHtml = await fetchBlockedPage(sheriffUrl);
+    for (const chunk of sheriffHtml.split(/Notice of Sheriff'?s? Sale/i).slice(1)) {
       const lead = parseSheriffNoticeText(chunk, COUNTY, STATE, sheriffUrl, fromDate);
       if (lead) {
         lead.city = lead.city || "Platte City";
@@ -612,94 +850,75 @@ async function scrapePlatteCounty(fromDate: string, toDate: string): Promise<Lea
 
     try {
       const taxUrl = "https://plattecountycollector.com/taxsale6.php";
-      let taxRes = await fetchWithRetry(taxUrl).catch(() => null);
-      if (!taxRes?.ok) taxRes = await fetchRendered(taxUrl).catch(() => null);
-      if (taxRes?.ok) {
-        const html = await taxRes.text();
-        if (html.trim().length > 100) {
-          const $ = cheerio.load(html);
-          $("table tr").each((_, row) => {
-            const cells = $(row)
-              .find("td")
-              .map((__, td) => $(td).text().trim())
-              .get();
-            if (cells.length < 2) return;
-            const owner = cells[0];
-            const address = cells[1] || cells[2];
-            if (!owner || owner.length < 2 || /owner|name|parcel/i.test(owner)) return;
-            leads.push({
-              id: makeId(COUNTY, STATE, "Tax Delinquent", `${owner}-${address}`),
-              county: COUNTY,
-              state: STATE,
-              lead_type: "Tax Delinquent",
-              owner_name: owner,
-              address: address || null,
-              city: "Platte City",
-              zip: null,
-              mailing_address: null,
-              mailing_city: null,
-              mailing_state: null,
-              mailing_zip: null,
-              case_number: cells[2] || null,
-              filing_date: formatDate(fromDate),
-              assessed_value: null,
-              tax_year: new Date().getFullYear().toString(),
-              lender: null,
-              loan_amount: null,
-              sale_date: null,
-              sale_amount: null,
-              description: `Platte County Tax Delinquent — ${owner}`,
-              source_url: taxUrl,
-              raw_data: JSON.stringify(cells),
-            });
+      const taxHtml = await fetchBlockedPage(taxUrl);
+      if (taxHtml.trim().length > 100) {
+        const $ = cheerio.load(taxHtml);
+        $("table tr").each((_, row) => {
+          const cells = $(row)
+            .find("td")
+            .map((__, td) => $(td).text().trim())
+            .get();
+          if (cells.length < 2) return;
+          const owner = cells[0];
+          const address = cells[1] || cells[2];
+          if (!owner || owner.length < 2 || /owner|name|parcel/i.test(owner)) return;
+          leads.push({
+            id: makeId(COUNTY, STATE, "Tax Delinquent", `${owner}-${address}`),
+            county: COUNTY,
+            state: STATE,
+            lead_type: "Tax Delinquent",
+            owner_name: owner,
+            address: address || null,
+            city: "Platte City",
+            zip: null,
+            mailing_address: null,
+            mailing_city: null,
+            mailing_state: null,
+            mailing_zip: null,
+            case_number: cells[2] || null,
+            filing_date: formatDate(fromDate),
+            assessed_value: null,
+            tax_year: new Date().getFullYear().toString(),
+            lender: null,
+            loan_amount: null,
+            sale_date: null,
+            sale_amount: null,
+            description: `Platte County Tax Delinquent — ${owner}`,
+            source_url: taxUrl,
+            raw_data: JSON.stringify(cells),
           });
-        }
+        });
       }
     } catch {
-      /* Platte collector TLS/page may be unavailable — sheriff + FSBO still run */
+      /* collector may be empty or TLS-blocked */
     }
 
-    const fsboUrl = "https://kansascity.craigslist.org/search/rea?query=platte&purveyor=owner";
-    const fsboRes = await fetchWithRetry(fsboUrl);
-    if (fsboRes.ok) {
-      const $ = cheerio.load(await fsboRes.text());
-      $("li.cl-static-search-result, li.result-row, .cl-search-result").each((_, el) => {
-        const title = $(el)
-          .find(".title, .result-title, a.posting-title, .title-blob")
-          .first()
-          .text()
-          .trim();
-        const price = $(el).find(".price, .result-price, .priceinfo").first().text().trim();
-        const date = $(el).find("time").attr("datetime") || "";
-        const link = $(el).find("a").first().attr("href") || "";
-        if (!title) return;
-        leads.push({
-          id: makeId(COUNTY, STATE, "FSBO", link || title),
-          county: COUNTY,
-          state: STATE,
-          lead_type: "FSBO",
-          owner_name: "FSBO Seller",
-          address: title,
-          city: "Platte City",
-          zip: null,
-          mailing_address: null,
-          mailing_city: null,
-          mailing_state: null,
-          mailing_zip: null,
-          case_number: null,
-          filing_date: formatDate(date || fromDate),
-          assessed_value: null,
-          tax_year: null,
-          lender: null,
-          loan_amount: null,
-          sale_date: null,
-          sale_amount: price.replace(/[^\d.]/g, "") || null,
-          description: title,
-          source_url: link.startsWith("http") ? link : `https://kansascity.craigslist.org${link}`,
-          raw_data: JSON.stringify({ title, price }),
-        });
-      });
+    const fsboSearches = [
+      "https://kansascity.craigslist.org/search/rea?query=platte&purveyor=owner",
+      "https://kansascity.craigslist.org/search/rea?query=parkville&purveyor=owner",
+      "https://kansascity.craigslist.org/search/rea?query=weston+mo&purveyor=owner",
+      "https://kansascity.craigslist.org/search/rea?query=platte+city&purveyor=owner",
+    ];
+    const seenFsbo = new Set<string>();
+    for (const fsboUrl of fsboSearches) {
+      const fsboHtml = await fetchBlockedPage(fsboUrl);
+      if (!fsboHtml) continue;
+      const batch: Lead[] = [];
+      appendCraigslistFsboLeads(batch, fsboHtml, COUNTY, fsboUrl, fromDate, "Platte City");
+      for (const lead of batch) {
+        if (!seenFsbo.has(lead.id)) {
+          seenFsbo.add(lead.id);
+          leads.push(lead);
+        }
+      }
     }
+
+    const [probate, lisPendens, bankruptcy] = await Promise.all([
+      scrapePlatteCaseNet("P", "Probate", fromDate, toDate),
+      scrapePlatteCaseNet("L", "Lis Pendens", fromDate, toDate),
+      scrapePlatteBankruptcy(fromDate, toDate),
+    ]);
+    leads.push(...probate, ...lisPendens, ...bankruptcy);
   } catch (e) {
     console.error(`[Platte MO] error:`, e);
   }
