@@ -99,43 +99,64 @@ async function scrapeJacksonPreForeclosure(fromDate: string, toDate: string): Pr
 }
 
 // ─── JACKSON COUNTY Tax Delinquent ───────────────────────────────────────────
-// CONFIRMED WORKING: Jackson County Collector publishes annual delinquent list
-// Primary: ArcGIS Parcel layer with delinquent flag
-// Fallback: jacksongov.org collector page for downloadable list links
+// 16th Circuit Court delinquent land tax — paginated ASP (direct fetch, no JS render)
+const DLT_BROWSE_URL = "https://www.16thcircuit.org/courtapps/dlt/browseall.asp";
+
+function parse16thCircuitParcel(html: string): {
+  suitNo: string;
+  parcel: string;
+  owner: string;
+  address: string;
+} | null {
+  const $ = cheerio.load(html);
+  const fields: Record<string, string> = {};
+  $("td.labels").each((_, labelEl) => {
+    const label = $(labelEl).text().replace(/\s+/g, " ").trim().toLowerCase();
+    const value = $(labelEl)
+      .nextAll("td.datafield")
+      .first()
+      .text()
+      .replace(/\u00a0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (label && value) fields[label] = value;
+  });
+  const parcel =
+    fields["parcel no"] ||
+    Object.values(fields).find((v) => /\d{2}-\d{3}-\d{2}-\d{2}/.test(v)) ||
+    "";
+  const owner = fields.owner || fields["record owner"] || "";
+  const address = fields["property address"] || "";
+  const suitNo = fields["suit no"] || "";
+  if (!parcel || !owner || /parcel|owner|suit/i.test(owner)) return null;
+  return { suitNo, parcel, owner, address };
+}
+
 async function scrapeJacksonTaxDelinquent(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
   const COUNTY = "Jackson";
-  const sourceUrl = "https://www.16thcircuit.org/browse-all-parcels";
+  const MAX_PAGES = 100;
   try {
-    // 16th Circuit Court — Delinquent Land Tax parcel grid (JS-rendered)
-    const res = await fetchRendered(sourceUrl);
-    if (!res.ok) return leads;
-    const html = await res.text();
-    const $ = cheerio.load(html);
-    $("table tr").each((_, row) => {
-      const cells = $(row)
-        .find("td")
-        .map((__, td) => $(td).text().replace(/\s+/g, " ").trim())
-        .get();
-      if (cells.length < 3) return;
-      const parcel = cells.find((c) => /\d{2}-\d{3}-\d{2}-\d{2}/.test(c)) || cells[0];
-      const owner = cells.find((c) => /[A-Z]{2,}/.test(c) && !/\d{2}-\d{3}/.test(c)) || cells[1];
-      const address = cells.find((c) => /\d+\s+[A-Za-z]/.test(c)) || cells[2];
-      if (!parcel || !owner || /parcel|owner|suit/i.test(owner)) return;
+    for (let index = 0; index < MAX_PAGES; index++) {
+      const pageUrl = index === 0 ? DLT_BROWSE_URL : `${DLT_BROWSE_URL}?index=${index}`;
+      const res = await fetchWithRetry(pageUrl);
+      if (!res.ok) break;
+      const parsed = parse16thCircuitParcel(await res.text());
+      if (!parsed) break;
       leads.push({
-        id: makeId(COUNTY, STATE, "Tax Delinquent", parcel),
+        id: makeId(COUNTY, STATE, "Tax Delinquent", parsed.parcel),
         county: COUNTY,
         state: STATE,
         lead_type: "Tax Delinquent",
-        owner_name: owner,
-        address: address || null,
+        owner_name: parsed.owner,
+        address: parsed.address || null,
         city: "Kansas City",
         zip: null,
         mailing_address: null,
         mailing_city: null,
         mailing_state: null,
         mailing_zip: null,
-        case_number: parcel,
+        case_number: parsed.suitNo || parsed.parcel,
         filing_date: formatDate(fromDate),
         assessed_value: null,
         tax_year: new Date().getFullYear().toString(),
@@ -143,15 +164,14 @@ async function scrapeJacksonTaxDelinquent(fromDate: string, toDate: string): Pro
         loan_amount: null,
         sale_date: null,
         sale_amount: null,
-        description: `Tax Delinquent — Parcel ${parcel} — ${owner}`,
-        source_url,
-        raw_data: JSON.stringify(cells),
+        description: `Tax Delinquent — Parcel ${parsed.parcel} — ${parsed.owner}`,
+        source_url: pageUrl,
+        raw_data: JSON.stringify(parsed),
       });
-    });
+    }
 
-    // Enrich situs + mailing via assessor when address missing
     const CONCURRENCY = 10;
-    const needsAddr = leads.filter((l) => l.owner_name && (!l.address || !l.zip));
+    const needsAddr = leads.filter((l) => l.owner_name && (!l.address || !l.zip)).slice(0, 40);
     for (let i = 0; i < needsAddr.length; i += CONCURRENCY) {
       const batch = needsAddr.slice(i, i + CONCURRENCY);
       const results = await Promise.all(

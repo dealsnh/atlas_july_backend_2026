@@ -159,9 +159,12 @@ export async function runAllScrapers(
       }
     }
 
-    // State-wide scrapers (run once per state, after county loop) — 90s timeout each
+    // State-wide scrapers — skip when validate/scrape targets specific lead types only
+    const isTargetedRun = stateCounties.some(
+      (c) => c.leadTypes?.length > 0 && c.leadTypes.length < 11,
+    );
     const beforeWide = stateLeads.length;
-    if (state === "AL") {
+    if (!isTargetedRun && state === "AL") {
       await runStateWideScrapers(
         [
           ["AL Bankruptcy", () => alabama.scrapeBankruptcy(fromDate, toDate)],
@@ -174,7 +177,7 @@ export async function runAllScrapers(
         errors,
         stateLeads,
       );
-    } else if (state === "OH") {
+    } else if (!isTargetedRun && state === "OH") {
       await runStateWideScrapers(
         [
           ["OH Bankruptcy", () => ohio.scrapeBankruptcy(fromDate, toDate)],
@@ -188,7 +191,7 @@ export async function runAllScrapers(
         errors,
         stateLeads,
       );
-    } else if (state === "SC") {
+    } else if (!isTargetedRun && state === "SC") {
       await runStateWideScrapers(
         [
           ["SC Bankruptcy", () => southCarolina.scrapeBankruptcy(fromDate, toDate)],

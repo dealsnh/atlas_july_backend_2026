@@ -137,6 +137,22 @@ async function scrapeTaxDelinquent(county: string, fromDate: string, toDate: str
         raw_data: JSON.stringify(cells),
       });
     }
+
+    const CONCURRENCY = 10;
+    const needsOwner = leads.filter((l) => !l.owner_name?.trim() && l.address);
+    for (let i = 0; i < needsOwner.length; i += CONCURRENCY) {
+      const batch = needsOwner.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(
+        batch.map((l) => lookupByAddress(l.address!, l.county, "AL")),
+      );
+      for (let j = 0; j < batch.length; j++) {
+        const prop = results[j];
+        if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
+        if (prop?.address) batch[j].address = prop.address;
+        if (prop?.city) batch[j].city = prop.city;
+        if (prop?.zip) batch[j].zip = prop.zip;
+      }
+    }
   } catch (_) { /* silent */ }
   return leads;
 }
@@ -149,9 +165,13 @@ async function scrapeSheriffSales(county: string, fromDate: string, toDate: stri
   try {
     // Rubin Lublin — primary AL foreclosure/sheriff sale attorney, covers all counties
     const url = 'https://rubinlublin.com/foreclosure-listings/';
-    const res = await fetchWithRetry(url, { headers: HEADERS });
-    if (!res.ok) return leads;
-    const html = await res.text();
+    let res = await fetchWithRetry(url, { headers: HEADERS });
+    let html = res.ok ? await res.text() : "";
+    if (!html.includes("<tr") || !html.toLowerCase().includes(county.toLowerCase())) {
+      const rendered = await fetchRendered(url);
+      if (rendered.ok) html = await rendered.text();
+    }
+    if (!html) return leads;
     const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
     const rows = html.match(rowRe) || [];
     for (const row of rows) {

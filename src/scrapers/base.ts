@@ -46,6 +46,12 @@ const SKIP_SCRAPER_PATTERNS = [
   "api.scraperapi",    // Already proxied
   "opendata.",         // Open data APIs
   "data.kcmo.org/resource/",  // KCMO Socrata — no bot blocking, direct is fine
+  "data.cincinnati-oh.gov/",  // Cincinnati open data — direct JSON
+  "16thcircuit.org/",  // Jackson MO delinquent land tax — direct ASP pages
+  "hcauditor.org",     // Hamilton OH auditor XLSX + search (incl. wedge1 subdomain)
+  "services3.arcgis.com/",    // Jackson MO ArcGIS
+  "services.arcgis.com/",     // AL county ArcGIS
+  "arcgis/rest/services",     // ArcGIS REST queries
   "rss_outside",       // PACER RSS — requires direct (no ScraperAPI)
   "ecf.oh",            // PACER Ohio — direct RSS works
 ];
