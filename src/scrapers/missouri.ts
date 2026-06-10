@@ -18,6 +18,10 @@
  */
 
 import * as cheerio from "cheerio";
+import {
+  filterLeadsByTypes,
+  normalizeLeadTypes,
+} from "../config/county-lead-types.js";
 import { Lead, makeId, formatDate, fetchWithRetry, fetchRendered, CountyConfig } from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
 
@@ -1195,7 +1199,16 @@ export async function scrapeCounty(
   toDate: string,
   leadTypes?: string[],
 ): Promise<Lead[]> {
+  const norm = county.toLowerCase();
+
+  const countyBulk: Record<string, () => Promise<Lead[]>> = {
+    clay: () => scrapeClayCounty(fromDate, toDate),
+    platte: () => scrapePlatteCounty(fromDate, toDate),
+    cass: () => scrapeCassCounty(fromDate, toDate),
+  };
+
   const runners: Record<string, () => Promise<Lead[]>> = {
+    "Lis Pendens": () => scrapeLisPendens(fromDate, toDate),
     "Water Shutoff": () => scrapeMOWaterShutoffs(fromDate, toDate),
     "Fire Damage": () => scrapeMOFireDamage(fromDate, toDate),
     "Code Violation": () => scrapeKCCodeViolations(fromDate, toDate),
@@ -1204,18 +1217,32 @@ export async function scrapeCounty(
     "Pre-Foreclosure": () => scrapeJacksonPreForeclosure(fromDate, toDate),
     Probate: () => scrapeJacksonProbate(fromDate, toDate),
     Bankruptcy: () => scrapeBankruptcy(fromDate, toDate),
-    "Vacant Abandoned": () => scrapeMOVacantAbandoned(fromDate, toDate),
+    "Vacant/Abandoned": () => scrapeMOVacantAbandoned(fromDate, toDate),
     FSBO: () => scrapeKCCraigslistFSBO(fromDate, toDate),
     Divorce: () => scrapeMODivorce(fromDate, toDate),
     Obituary: () => scrapeMOObituaries(fromDate, toDate),
   };
 
-  const types = leadTypes?.length ? leadTypes : Object.keys(runners);
-  const fns = types.map((t) => runners[t]).filter(Boolean) as Array<() => Promise<Lead[]>>;
+  const types = leadTypes?.length ? normalizeLeadTypes(leadTypes) : Object.keys(runners);
+  const wants = (type: string) => types.includes(type);
+  const fns: Array<() => Promise<Lead[]>> = [];
+
+  if (countyBulk[norm] && (!leadTypes?.length || wants("Sheriff Sale") || wants("Tax Delinquent"))) {
+    fns.push(countyBulk[norm]);
+  }
+
+  for (const [type, fn] of Object.entries(runners)) {
+    if (wants(type)) fns.push(fn);
+  }
+
   const results = await Promise.allSettled(fns.map((fn) => fn()));
-  const leads = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+  let leads = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
   if (!county) return leads;
-  return leads.filter((l) => l.county.toLowerCase() === county.toLowerCase());
+
+  leads = leads.filter((l) => l.county.toLowerCase() === norm);
+  if (leadTypes?.length) leads = filterLeadsByTypes(leads, leadTypes);
+
+  return leads;
 }
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────

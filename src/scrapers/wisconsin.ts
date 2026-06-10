@@ -20,6 +20,7 @@
  */
 
 import * as cheerio from "cheerio";
+import { normalizeLeadTypes } from "../config/county-lead-types.js";
 import { Lead, makeId, formatDate, fetchWithRetry } from "./base.js";
 
 const STATE = "WI";
@@ -608,6 +609,28 @@ export async function scrapeVacantAbandoned(fromDate: string, toDate: string): P
     }
   } catch (e) { console.error("[WI] Vacant/Abandoned error:", e); }
   return leads;
+}
+
+export async function scrapeCounty(
+  county: string,
+  fromDate: string,
+  toDate: string,
+  leadTypes?: string[],
+): Promise<Lead[]> {
+  const runners: Record<string, () => Promise<Lead[]>> = {
+    "Pre-Foreclosure": () => scrapePreForeclosure(county, fromDate, toDate),
+    "Sheriff Sale": () => scrapeSheriffSales(county, fromDate, toDate),
+    "Tax Delinquent": () => scrapeTaxDelinquent(county, fromDate, toDate),
+    Probate: () => scrapeProbate(county, fromDate, toDate),
+  };
+
+  const types = leadTypes?.length ? normalizeLeadTypes(leadTypes) : Object.keys(runners);
+  const fns = types.map((t) => runners[t]).filter(Boolean) as Array<() => Promise<Lead[]>>;
+  const results = await Promise.allSettled(fns.map((fn) => fn()));
+
+  return results
+    .filter((r) => r.status === "fulfilled")
+    .flatMap((r) => (r as PromiseFulfilledResult<Lead[]>).value);
 }
 
 export async function scrapeAll(fromDate: string, toDate: string): Promise<Lead[]> {

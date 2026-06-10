@@ -1,4 +1,5 @@
 import cron from "node-cron";
+import { resolveCountyLeadTypes } from "../config/county-lead-types.js";
 import { clientConfig } from "../config/constants.js";
 import { findLeadById, findLeads, insertLeadIfNotExists } from "../repositories/leads.repository.js";
 import {
@@ -14,18 +15,6 @@ import { enrichLeads, isLeadSaveable } from "./enrichment.service.js";
 import { sendDailyReport } from "./email.service.js";
 import { getEmailRecipients, getRawSettings, isSmtpReady } from "./settings.service.js";
 import { skipTraceLeadsBatch } from "./skip-trace.service.js";
-
-const DEFAULT_LEAD_TYPES = [
-  "Pre-Foreclosure",
-  "Tax Delinquent",
-  "Probate",
-  "Sheriff Sale",
-  "FSBO",
-  "Obituary",
-  "Code Violation",
-  "Divorce",
-  "Fire Damage",
-];
 
 let scrapeInProgress = false;
 let lastScrapeLog: string[] = [];
@@ -57,7 +46,7 @@ function buildCountyConfigs(): CountyConfig[] {
   return clientConfig.counties.map((county) => ({
     name: county.name || county.county,
     state: county.state,
-    leadTypes: DEFAULT_LEAD_TYPES,
+    leadTypes: resolveCountyLeadTypes(county),
     publicsearch_slug: county.publicsearch_slug,
     publicsearch_state: county.publicsearch_state,
   }));
@@ -207,7 +196,7 @@ export function startDailyCron(): void {
   );
 
   logger.info("Daily scrape scheduled for 9:00 AM PT");
-}
+} 
 
 export { getDateRange };
 
@@ -231,17 +220,26 @@ export async function validateCountyScrape(params: {
   const daysBack = Math.min(params.days_back ?? 7, 90);
   const { fromDate, toDate } = getDateRange(daysBack);
 
-  const countyConfig: CountyConfig = {
-    name: params.county,
-    state: params.state,
-    leadTypes: params.lead_type ? [params.lead_type] : DEFAULT_LEAD_TYPES,
-  };
-
   const configured = clientConfig.counties.find(
     (c) =>
       c.state === params.state &&
       (c.name === params.county || c.county === params.county),
   );
+
+  const countyConfig: CountyConfig = {
+    name: params.county,
+    state: params.state,
+    leadTypes: params.lead_type
+      ? [params.lead_type]
+      : resolveCountyLeadTypes(
+          configured ?? {
+            name: params.county,
+            county: params.county,
+            state: params.state,
+          },
+        ),
+  };
+
   if (configured?.publicsearch_slug) {
     countyConfig.publicsearch_slug = configured.publicsearch_slug;
     countyConfig.publicsearch_state = configured.publicsearch_state;

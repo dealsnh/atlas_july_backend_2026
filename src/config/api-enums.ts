@@ -18,6 +18,7 @@ export const LEAD_TYPES = [
   "Vacant/Abandoned",
   "Out-of-State Owner",
   "Water Shutoff",
+  "Foreclosure",
   "Other",
 ] as const;
 export type LeadType = (typeof LEAD_TYPES)[number];

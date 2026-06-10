@@ -13,6 +13,7 @@
  */
 
 import * as cheerio from "cheerio";
+import { filterLeadsByTypes, normalizeLeadTypes } from "../config/county-lead-types.js";
 import { Lead, makeId, formatDate, fetchWithRetry } from "./base.js";
 
 const STATE = "SC";
@@ -648,29 +649,46 @@ async function scrapeMarionCounty(fromDate: string, toDate: string): Promise<Lea
 
 // ─── MASTER SCRAPER ───────────────────────────────────────────────────────────
 
-export async function scrapeSC(county: string, fromDate: string, toDate: string): Promise<Lead[]> {
-  const leads: Lead[] = [];
+export async function scrapeSC(
+  county: string,
+  fromDate: string,
+  toDate: string,
+  leadTypes?: string[],
+): Promise<Lead[]> {
+  const norm = county.toLowerCase();
+  const types = leadTypes?.length ? normalizeLeadTypes(leadTypes) : null;
+  const wants = (type: string) => !types || types.includes(type);
 
-  switch (county.toLowerCase()) {
-    case "horry":
-      leads.push(
-        ...(await scrapeHorryPreForeclosure(fromDate, toDate)),
-        ...(await scrapeHorryForeclosure(fromDate, toDate)),
-        ...(await scrapeHorryTaxDelinquent(fromDate, toDate)),
-        ...(await scrapeHorryProbate(fromDate, toDate)),
-        ...(await scrapeHorrySheriffSales(fromDate, toDate)),
-      );
+  const horryRunners: Record<string, () => Promise<Lead[]>> = {
+    "Pre-Foreclosure": () => scrapeHorryPreForeclosure(fromDate, toDate),
+    Foreclosure: () => scrapeHorryForeclosure(fromDate, toDate),
+    "Tax Delinquent": () => scrapeHorryTaxDelinquent(fromDate, toDate),
+    Probate: () => scrapeHorryProbate(fromDate, toDate),
+    "Sheriff Sale": () => scrapeHorrySheriffSales(fromDate, toDate),
+  };
+
+  let leads: Lead[] = [];
+
+  switch (norm) {
+    case "horry": {
+      const fns = Object.entries(horryRunners)
+        .filter(([type]) => wants(type))
+        .map(([, fn]) => fn);
+      const results = await Promise.allSettled(fns.map((fn) => fn()));
+      leads = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
       break;
+    }
     case "georgetown":
-      leads.push(...(await scrapeGeorgetownCounty(fromDate, toDate)));
+      leads = await scrapeGeorgetownCounty(fromDate, toDate);
       break;
     case "marion":
-      leads.push(...(await scrapeMarionCounty(fromDate, toDate)));
+      leads = await scrapeMarionCounty(fromDate, toDate);
       break;
     default:
       console.warn(`[SC] No scraper for county: ${county}`);
   }
 
+  if (types?.length) leads = filterLeadsByTypes(leads, types);
   return leads;
 }
 

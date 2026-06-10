@@ -794,7 +794,7 @@ export async function scrapeOhio(
     "Code Violation": () => scrapeCodeViolationsHamilton(fromDate, toDate),
     Obituary: () => scrapeObituaries(fromDate, toDate),
     Divorce: () => scrapeDivorce(fromDate, toDate),
-    "Vacant Abandoned": () => scrapeVacantAbandoned(fromDate, toDate),
+    "Vacant/Abandoned": () => scrapeVacantAbandoned(fromDate, toDate),
   };
 
   const types = leadTypes?.length ? leadTypes : Object.keys(runners);

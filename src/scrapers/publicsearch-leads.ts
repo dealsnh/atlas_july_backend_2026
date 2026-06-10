@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { leadMatchesRequestedType } from "../config/county-lead-types.js";
 import { Lead, makeId, formatDate } from "./base.js";
 import {
   extractAddressFromDoc,
@@ -64,11 +65,13 @@ export async function scrapePublicSearchLeads(
   stateCode: string,
   fromDate: string,
   toDate: string,
+  leadTypes?: string[],
 ): Promise<Lead[]> {
   const baseUrl = `https://${slug}.${stateCode}.publicsearch.us`;
   const leads: Lead[] = [];
 
   for (const { leadType, searchValue } of DOC_SEARCHES) {
+    if (leadTypes?.length && !leadMatchesRequestedType(leadType, leadTypes)) continue;
     const docs = await scrapePublicSearch(slug, stateCode, searchValue, fromDate, toDate);
     for (const doc of docs) {
       let lead = docToLead(doc, county, state, leadType, searchValue, baseUrl);
