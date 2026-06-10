@@ -172,9 +172,9 @@ export function startScrapeJob(fromDate: string, toDate: string): void {
 
 export function startDailyCron(): void {
   cron.schedule(
-    "0 11 * * *",
+    "0 9 * * *",
     async () => {
-      logger.info("Running daily scrape at 6am EST");
+      logger.info("Running daily scrape at 9:00 AM PT");
       const { fromDate, toDate } = getDateRange(1);
 
       try {
@@ -203,10 +203,10 @@ export function startDailyCron(): void {
         logger.error({ err: error }, "Daily scrape failed");
       }
     },
-    { timezone: "America/New_York" },
+    { timezone: "America/Los_Angeles" },
   );
 
-  logger.info("Daily scrape scheduled for 6:00 AM EST");
+  logger.info("Daily scrape scheduled for 9:00 AM PT");
 }
 
 export { getDateRange };

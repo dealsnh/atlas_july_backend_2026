@@ -55,7 +55,7 @@ export async function sendDailyReport(
         </div>
         <div style="background:#f8f9fa;padding:24px;border-radius:0 0 8px 8px">
           <h3 style="margin-top:0;color:#28a745">✅ Your email is configured correctly!</h3>
-          <p>This is a test message from Atlas. Your daily lead reports will be delivered to this address every morning at 6:00 AM EST.</p>
+          <p>This is a test message from Atlas. Your daily lead reports will be delivered to this address every morning at 9:00 AM PT.</p>
         </div>
       </div>`
     : `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
