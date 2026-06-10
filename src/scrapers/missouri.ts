@@ -527,18 +527,15 @@ function appendCraigslistFsboLeads(
   defaultCity: string,
 ): void {
   const $ = cheerio.load(html);
-  $("li.cl-static-search-result, li.result-row, .cl-search-result").each((_, el) => {
-    const title = $(el)
-      .find(".title, .result-title, a.posting-title, .title-blob")
-      .first()
-      .text()
-      .trim();
-    const price = $(el).find(".price, .result-price, .priceinfo").first().text().trim();
-    const date = $(el).find("time").attr("datetime") || "";
-    const link = $(el).find("a").first().attr("href") || "";
-    if (!title) return;
+  const seen = new Set(leads.map((l) => l.id));
+
+  const pushFsbo = (title: string, link: string, price: string, date: string) => {
+    if (!title || title.length < 5) return;
+    const id = makeId(county, STATE, "FSBO", link || title);
+    if (seen.has(id)) return;
+    seen.add(id);
     leads.push({
-      id: makeId(county, STATE, "FSBO", link || title),
+      id,
       county,
       state: STATE,
       lead_type: "FSBO",
@@ -562,6 +559,28 @@ function appendCraigslistFsboLeads(
       source_url: link.startsWith("http") ? link : `https://kansascity.craigslist.org${link}`,
       raw_data: JSON.stringify({ title, price, sourceUrl }),
     });
+  };
+
+  $("li.cl-static-search-result, li.result-row, .cl-search-result").each((_, el) => {
+    const title = $(el)
+      .find(".title, .result-title, a.posting-title, .title-blob")
+      .first()
+      .text()
+      .trim();
+    const price = $(el).find(".price, .result-price, .priceinfo").first().text().trim();
+    const date = $(el).find("time").attr("datetime") || "";
+    const link = $(el).find("a").first().attr("href") || "";
+    pushFsbo(title, link, price, date);
+  });
+
+  $("a[href*='/rea/d/'], a[href*='/reo/d/']").each((_, el) => {
+    const link = $(el).attr("href") || "";
+    const title =
+      $(el).find(".title").first().text().trim() ||
+      $(el).text().trim() ||
+      $(el).attr("title") ||
+      "";
+    pushFsbo(title, link, "", "");
   });
 }
 
@@ -899,12 +918,13 @@ async function scrapePlatteCounty(fromDate: string, toDate: string): Promise<Lea
       "https://kansascity.craigslist.org/search/rea?query=weston+mo&purveyor=owner",
       "https://kansascity.craigslist.org/search/rea?query=platte+city&purveyor=owner",
     ];
+    const fsboHtmls = await Promise.all(fsboSearches.map((u) => fetchBlockedPage(u)));
     const seenFsbo = new Set<string>();
-    for (const fsboUrl of fsboSearches) {
-      const fsboHtml = await fetchBlockedPage(fsboUrl);
+    for (let i = 0; i < fsboSearches.length; i++) {
+      const fsboHtml = fsboHtmls[i];
       if (!fsboHtml) continue;
       const batch: Lead[] = [];
-      appendCraigslistFsboLeads(batch, fsboHtml, COUNTY, fsboUrl, fromDate, "Platte City");
+      appendCraigslistFsboLeads(batch, fsboHtml, COUNTY, fsboSearches[i], fromDate, "Platte City");
       for (const lead of batch) {
         if (!seenFsbo.has(lead.id)) {
           seenFsbo.add(lead.id);

@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { spawnSync } from "child_process";
 import { createHash } from "crypto";
 
 export interface Lead {
@@ -159,12 +160,45 @@ function looksBlocked(html: string): boolean {
   return /403 Forbidden|Access Denied|cf-browser-verification|Just a moment/i.test(html);
 }
 
+function fetchViaBrightDataCurl(url: string, options: RequestInit = {}): string {
+  const user = process.env.BRIGHT_DATA_USER;
+  const pass = process.env.BRIGHT_DATA_PASS;
+  if (!user || !pass) return "";
+
+  const args = [
+    "-sSL",
+    "--max-time",
+    "45",
+    "-x",
+    `http://${user}:${pass}@brd.superproxy.io:22225`,
+    "-H",
+    "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "-H",
+    "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  ];
+  if (options.method === "POST" && options.body) {
+    args.push(
+      "-X",
+      "POST",
+      "-H",
+      "Content-Type: application/x-www-form-urlencoded",
+      "--data",
+      String(options.body),
+    );
+  }
+  args.push(url);
+
+  const result = spawnSync("curl", args, { encoding: "utf8", maxBuffer: 12 * 1024 * 1024 });
+  return result.stdout || "";
+}
+
 /**
  * fetchBlockedPage — direct fetch, then ScraperAPI proxy + render for sites that
  * block datacenter IPs (e.g. Platte sheriff, Craigslist on Railway).
  */
 export async function fetchBlockedPage(url: string, options: RequestInit = {}): Promise<string> {
   const SCRAPER_KEY = process.env.SCRAPER_API_KEY;
+  const isCraigslist = url.includes("craigslist.org");
   let html = "";
 
   try {
@@ -197,16 +231,21 @@ export async function fetchBlockedPage(url: string, options: RequestInit = {}): 
       /* try rendered */
     }
 
-    try {
-      const rendered = await fetchRendered(url);
-      if (rendered.ok) {
-        const t = await rendered.text();
-        if (t && !looksBlocked(t)) return t;
+    if (!isCraigslist) {
+      try {
+        const rendered = await fetchRendered(url);
+        if (rendered.ok) {
+          const t = await rendered.text();
+          if (t && !looksBlocked(t)) return t;
+        }
+      } catch {
+        /* fall through */
       }
-    } catch {
-      /* fall through */
     }
   }
+
+  const bright = fetchViaBrightDataCurl(url, options);
+  if (bright && !looksBlocked(bright)) return bright;
 
   return html;
 }
