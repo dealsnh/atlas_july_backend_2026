@@ -35,7 +35,10 @@ async function login(): Promise<string> {
   return token;
 }
 
-async function validateCase(token: string, c: Case): Promise<{
+async function validateCase(
+  token: string,
+  c: Case,
+): Promise<{
   total: number;
   saveable: number;
   errors: number;

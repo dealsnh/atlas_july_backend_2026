@@ -48,8 +48,22 @@ export const COUNTY_DEFAULT_LEAD_TYPES: Record<string, readonly string[]> = {
     "FSBO",
     "Bankruptcy",
   ],
-  "AL:Shelby": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "FSBO", "Bankruptcy"],
-  "AL:Morgan": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "FSBO", "Bankruptcy"],
+  "AL:Shelby": [
+    "Pre-Foreclosure",
+    "Tax Delinquent",
+    "Sheriff Sale",
+    "Probate",
+    "FSBO",
+    "Bankruptcy",
+  ],
+  "AL:Morgan": [
+    "Pre-Foreclosure",
+    "Tax Delinquent",
+    "Sheriff Sale",
+    "Probate",
+    "FSBO",
+    "Bankruptcy",
+  ],
   "AL:Limestone": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],
   "AL:Montgomery": [
     "Pre-Foreclosure",
@@ -59,8 +73,22 @@ export const COUNTY_DEFAULT_LEAD_TYPES: Record<string, readonly string[]> = {
     "FSBO",
     "Bankruptcy",
   ],
-  "AL:Autauga": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "FSBO", "Bankruptcy"],
-  "AL:Elmore": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "FSBO", "Bankruptcy"],
+  "AL:Autauga": [
+    "Pre-Foreclosure",
+    "Tax Delinquent",
+    "Sheriff Sale",
+    "Probate",
+    "FSBO",
+    "Bankruptcy",
+  ],
+  "AL:Elmore": [
+    "Pre-Foreclosure",
+    "Tax Delinquent",
+    "Sheriff Sale",
+    "Probate",
+    "FSBO",
+    "Bankruptcy",
+  ],
   "SC:Horry": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "Foreclosure"],
   "SC:Georgetown": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "Foreclosure"],
   "SC:Marion": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "Foreclosure"],
@@ -117,9 +145,7 @@ function countyKey(state: string, name: string): string {
 }
 
 export function resolveCountyLeadTypes(county: ClientCounty): string[] {
-  const explicit = county.lead_types?.length
-    ? normalizeLeadTypes(county.lead_types)
-    : undefined;
+  const explicit = county.lead_types?.length ? normalizeLeadTypes(county.lead_types) : undefined;
   if (explicit?.length) return explicit;
 
   const name = county.name || county.county;

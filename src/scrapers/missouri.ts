@@ -18,10 +18,7 @@
  */
 
 import * as cheerio from "cheerio";
-import {
-  filterLeadsByTypes,
-  normalizeLeadTypes,
-} from "../config/county-lead-types.js";
+import { filterLeadsByTypes, normalizeLeadTypes } from "../config/county-lead-types.js";
 import { Lead, makeId, formatDate, fetchWithRetry, fetchRendered, CountyConfig } from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
 
@@ -38,7 +35,9 @@ async function scrapeJacksonPreForeclosure(fromDate: string, toDate: string): Pr
     const url = `https://recorder.jacksongov.org/search/commonsearch.aspx?mode=advanced`;
     const res = await fetchRendered(url).catch(() => null);
     if (!res || !res.ok) {
-      console.warn(`[Jackson MO] Pre-Foreclosure: recorder.jacksongov.org unreachable even via proxy — covered by Case.net LIS PENDENS scraper`);
+      console.warn(
+        `[Jackson MO] Pre-Foreclosure: recorder.jacksongov.org unreachable even via proxy — covered by Case.net LIS PENDENS scraper`,
+      );
       return leads;
     }
 
@@ -53,12 +52,12 @@ async function scrapeJacksonPreForeclosure(fromDate: string, toDate: string): Pr
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        "__VIEWSTATE": viewstate || "",
-        "__EVENTVALIDATION": eventvalidation || "",
-        "DocType": "LIS PENDENS",
-        "DateFrom": fromDate,
-        "DateTo": toDate,
-        "btnSearch": "Search",
+        __VIEWSTATE: viewstate || "",
+        __EVENTVALIDATION: eventvalidation || "",
+        DocType: "LIS PENDENS",
+        DateFrom: fromDate,
+        DateTo: toDate,
+        btnSearch: "Search",
       }).toString(),
     });
 
@@ -80,16 +79,25 @@ async function scrapeJacksonPreForeclosure(fromDate: string, toDate: string): Pr
 
         leads.push({
           id: makeId(COUNTY, STATE, "Pre-Foreclosure", docNum),
-          county: COUNTY, state: STATE,
+          county: COUNTY,
+          state: STATE,
           lead_type: "Pre-Foreclosure",
           owner_name: grantor || null,
-          address: address || null, city: "Kansas City", zip: null,
-          mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+          address: address || null,
+          city: "Kansas City",
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
           case_number: docNum,
           filing_date: formatDate(recDate),
-          assessed_value: null, tax_year: null,
-          lender: grantee || null, loan_amount: null,
-          sale_date: null, sale_amount: null,
+          assessed_value: null,
+          tax_year: null,
+          lender: grantee || null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
           description: `Lis Pendens recorded — ${grantor} / ${grantee}`,
           source_url: url,
           raw_data: JSON.stringify({ docNum, grantor, grantee, recDate }),
@@ -214,7 +222,7 @@ async function scrapeJacksonSheriffSales(fromDate: string, toDate: string): Prom
   const COUNTY = "Jackson";
   try {
     // Jackson County Sheriff — civil process / foreclosure sales
-    const url = 'https://www.jacksongov.org/government/departments/sheriff/civil-process';
+    const url = "https://www.jacksongov.org/government/departments/sheriff/civil-process";
     const res = await fetchWithRetry(url);
     if (!res.ok) return leads;
 
@@ -235,16 +243,25 @@ async function scrapeJacksonSheriffSales(fromDate: string, toDate: string): Prom
 
       leads.push({
         id: makeId(COUNTY, STATE, "Sheriff Sale", caseNum),
-        county: COUNTY, state: STATE,
+        county: COUNTY,
+        state: STATE,
         lead_type: "Sheriff Sale",
         owner_name: null,
-        address: address || null, city: "Kansas City", zip: null,
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+        address: address || null,
+        city: "Kansas City",
+        zip: null,
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
         case_number: caseNum,
         filing_date: formatDate(fromDate),
-        assessed_value: null, tax_year: null,
-        lender: null, loan_amount: null,
-        sale_date: formatDate(saleDate || ''), sale_amount: amount || null,
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
+        sale_date: formatDate(saleDate || ""),
+        sale_amount: amount || null,
         description: `Sheriff Sale — Case ${caseNum}`,
         source_url: url,
         raw_data: JSON.stringify({ caseNum, address, saleDate, amount }),
@@ -255,18 +272,30 @@ async function scrapeJacksonSheriffSales(fromDate: string, toDate: string): Prom
     $("a[href*='civil'], a[href*='sale'], a[href*='foreclos']").each((_, el) => {
       const href = $(el).attr("href");
       const text = $(el).text().trim();
-      if (!href || leads.some(l => l.source_url === href)) return;
+      if (!href || leads.some((l) => l.source_url === href)) return;
       leads.push({
         id: makeId(COUNTY, STATE, "Sheriff Sale", href),
-        county: COUNTY, state: STATE,
+        county: COUNTY,
+        state: STATE,
         lead_type: "Sheriff Sale",
-        owner_name: null, address: null, city: "Kansas City", zip: null,
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
-        case_number: null, filing_date: formatDate(fromDate),
-        assessed_value: null, tax_year: null, lender: null, loan_amount: null,
-        sale_date: null, sale_amount: null,
+        owner_name: null,
+        address: null,
+        city: "Kansas City",
+        zip: null,
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
+        case_number: null,
+        filing_date: formatDate(fromDate),
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
+        sale_date: null,
+        sale_amount: null,
         description: `Jackson County Sheriff Sale — ${text}`,
-        source_url: href.startsWith('http') ? href : `https://www.jacksongov.org${href}`,
+        source_url: href.startsWith("http") ? href : `https://www.jacksongov.org${href}`,
         raw_data: JSON.stringify({ text, href }),
       });
     });
@@ -286,7 +315,7 @@ async function scrapeJacksonProbate(fromDate: string, toDate: string): Promise<L
     const url = `https://www.courts.mo.gov/casenet/cases/searchCases.do`;
     const body = new URLSearchParams({
       countyCode: "16", // Jackson County
-      caseType: "P",    // Probate
+      caseType: "P", // Probate
       fromDate: fromDate,
       toDate: toDate,
       submit: "Search",
@@ -326,7 +355,7 @@ async function scrapeJacksonProbate(fromDate: string, toDate: string): Promise<L
     for (let i = 0; i < cases.length; i += CONCURRENCY) {
       const batch = cases.slice(i, i + CONCURRENCY);
       const results = await Promise.all(
-        batch.map(c => lookupOwnerProperties(c.caseName, COUNTY, STATE))
+        batch.map((c) => lookupOwnerProperties(c.caseName, COUNTY, STATE)),
       );
       for (let j = 0; j < batch.length; j++) {
         const { caseNum, caseName, filedDate } = batch[j];
@@ -335,15 +364,25 @@ async function scrapeJacksonProbate(fromDate: string, toDate: string): Promise<L
         for (const prop of properties) {
           leads.push({
             id: makeId(COUNTY, STATE, "Probate", `${caseNum}-${prop.address}`),
-            county: COUNTY, state: STATE,
+            county: COUNTY,
+            state: STATE,
             lead_type: "Probate/Estate",
             owner_name: caseName || null,
-            address: prop.address, city: prop.city || "Kansas City", zip: prop.zip || null,
-            mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+            address: prop.address,
+            city: prop.city || "Kansas City",
+            zip: prop.zip || null,
+            mailing_address: null,
+            mailing_city: null,
+            mailing_state: null,
+            mailing_zip: null,
             case_number: caseNum,
             filing_date: formatDate(filedDate),
-            assessed_value: null, tax_year: null,
-            lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+            assessed_value: null,
+            tax_year: null,
+            lender: null,
+            loan_amount: null,
+            sale_date: null,
+            sale_amount: null,
             description: `Jackson County MO Probate — ${caseName || caseNum}`,
             source_url: url,
             raw_data: JSON.stringify({ caseNum, caseName, filedDate, parcelId: prop.parcelId }),
@@ -380,16 +419,25 @@ async function scrapeClayCounty(fromDate: string, toDate: string): Promise<Lead[
 
         leads.push({
           id: makeId(COUNTY, STATE, "Sheriff Sale", caseNum),
-          county: COUNTY, state: STATE,
+          county: COUNTY,
+          state: STATE,
           lead_type: "Sheriff Sale",
           owner_name: null,
-          address: address || null, city: "Liberty", zip: null,
-          mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+          address: address || null,
+          city: "Liberty",
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
           case_number: caseNum,
           filing_date: formatDate(fromDate),
-          assessed_value: null, tax_year: null,
-          lender: null, loan_amount: null,
-          sale_date: formatDate(saleDate), sale_amount: null,
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: formatDate(saleDate),
+          sale_amount: null,
           description: `Clay County Sheriff Sale — ${caseNum}`,
           source_url: sheriffUrl,
           raw_data: JSON.stringify({ caseNum, address, saleDate }),
@@ -410,14 +458,25 @@ async function scrapeClayCounty(fromDate: string, toDate: string): Promise<Lead[
         if (!href) return;
         leads.push({
           id: makeId(COUNTY, STATE, "Tax Delinquent", href),
-          county: COUNTY, state: STATE,
+          county: COUNTY,
+          state: STATE,
           lead_type: "Tax Delinquent",
-          owner_name: null, address: null, city: null, zip: null,
-          mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+          owner_name: null,
+          address: null,
+          city: null,
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
           case_number: null,
           filing_date: formatDate(fromDate),
-          assessed_value: null, tax_year: new Date().getFullYear().toString(),
-          lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+          assessed_value: null,
+          tax_year: new Date().getFullYear().toString(),
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
           description: `Clay County Tax Delinquent — ${text}`,
           source_url: href.startsWith("http") ? href : `https://www.claycountymo.gov${href}`,
           raw_data: JSON.stringify({ text }),
@@ -453,16 +512,25 @@ async function scrapePlatteCounty(fromDate: string, toDate: string): Promise<Lea
 
       leads.push({
         id: makeId(COUNTY, STATE, "Sheriff Sale", caseNum),
-        county: COUNTY, state: STATE,
+        county: COUNTY,
+        state: STATE,
         lead_type: "Sheriff Sale",
         owner_name: null,
-        address: address || null, city: "Platte City", zip: null,
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+        address: address || null,
+        city: "Platte City",
+        zip: null,
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
         case_number: caseNum,
         filing_date: formatDate(fromDate),
-        assessed_value: null, tax_year: null,
-        lender: null, loan_amount: null,
-        sale_date: formatDate(saleDate), sale_amount: null,
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
+        sale_date: formatDate(saleDate),
+        sale_amount: null,
         description: `Platte County Sheriff Sale — ${caseNum}`,
         source_url: url,
         raw_data: JSON.stringify({ caseNum, address, saleDate }),
@@ -497,16 +565,25 @@ async function scrapeCassCounty(fromDate: string, toDate: string): Promise<Lead[
 
       leads.push({
         id: makeId(COUNTY, STATE, "Sheriff Sale", caseNum),
-        county: COUNTY, state: STATE,
+        county: COUNTY,
+        state: STATE,
         lead_type: "Sheriff Sale",
         owner_name: null,
-        address: address || null, city: "Harrisonville", zip: null,
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+        address: address || null,
+        city: "Harrisonville",
+        zip: null,
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
         case_number: caseNum,
         filing_date: formatDate(fromDate),
-        assessed_value: null, tax_year: null,
-        lender: null, loan_amount: null,
-        sale_date: formatDate(saleDate), sale_amount: null,
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
+        sale_date: formatDate(saleDate),
+        sale_amount: null,
         description: `Cass County Sheriff Sale — ${caseNum}`,
         source_url: url,
         raw_data: JSON.stringify({ caseNum, address, saleDate }),
@@ -614,21 +691,37 @@ async function scrapeKCCraigslistFSBO(fromDate: string, toDate: string): Promise
 
       const locLower = location.toLowerCase();
       let county = "Jackson";
-      if (locLower.includes("liberty") || locLower.includes("kearney") || locLower.includes("clay")) county = "Clay";
+      if (locLower.includes("liberty") || locLower.includes("kearney") || locLower.includes("clay"))
+        county = "Clay";
       else if (locLower.includes("platte") || locLower.includes("parkville")) county = "Platte";
-      else if (locLower.includes("cass") || locLower.includes("harrisonville") || locLower.includes("belton")) county = "Cass";
+      else if (
+        locLower.includes("cass") ||
+        locLower.includes("harrisonville") ||
+        locLower.includes("belton")
+      )
+        county = "Cass";
 
       leads.push({
         id: makeId(county, STATE, "FSBO", link || title),
-        county, state: STATE,
+        county,
+        state: STATE,
         lead_type: "FSBO",
         owner_name: null,
-        address: location || null, city: location || null, zip: null,
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+        address: location || null,
+        city: location || null,
+        zip: null,
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
         case_number: null,
         filing_date: formatDate(date || fromDate),
-        assessed_value: null, tax_year: null,
-        lender: null, loan_amount: null, sale_date: null, sale_amount: price || null,
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
+        sale_date: null,
+        sale_amount: price || null,
         description: title,
         source_url: link?.startsWith("http") ? link : `https://kansascity.craigslist.org${link}`,
         raw_data: JSON.stringify({ title, price, location }),
@@ -648,9 +741,9 @@ async function scrapeLisPendens(fromDate: string, toDate: string): Promise<Lead[
   const leads: Lead[] = [];
   const counties = [
     { name: "Jackson", code: "16", city: "Kansas City" },
-    { name: "Clay",    code: "12", city: "Liberty" },
-    { name: "Cass",    code: "7",  city: "Harrisonville" },
-    { name: "Platte",  code: "25", city: "Platte City" },
+    { name: "Clay", code: "12", city: "Liberty" },
+    { name: "Cass", code: "7", city: "Harrisonville" },
+    { name: "Platte", code: "25", city: "Platte City" },
   ];
   const url = `https://www.courts.mo.gov/casenet/cases/searchCases.do`;
   for (const { name, code } of counties) {
@@ -658,7 +751,8 @@ async function scrapeLisPendens(fromDate: string, toDate: string): Promise<Lead[
       const body = new URLSearchParams({
         countyCode: code,
         caseType: "L",
-        fromDate, toDate,
+        fromDate,
+        toDate,
         submit: "Search",
       }).toString();
       const res = await fetchWithRetry(url, {
@@ -687,7 +781,9 @@ async function scrapeLisPendens(fromDate: string, toDate: string): Promise<Lead[
       const CONCURRENCY = 5;
       for (let i = 0; i < cases.length; i += CONCURRENCY) {
         const batch = cases.slice(i, i + CONCURRENCY);
-        const results = await Promise.all(batch.map(c => lookupOwnerProperties(c.caseName, name, STATE)));
+        const results = await Promise.all(
+          batch.map((c) => lookupOwnerProperties(c.caseName, name, STATE)),
+        );
         for (let j = 0; j < batch.length; j++) {
           const { caseNum, caseName, filedDate } = batch[j];
           const properties = results[j];
@@ -695,15 +791,25 @@ async function scrapeLisPendens(fromDate: string, toDate: string): Promise<Lead[
           for (const prop of properties) {
             leads.push({
               id: makeId(name, STATE, "Lis Pendens", `${caseNum}-${prop.address}`),
-              county: name, state: STATE,
+              county: name,
+              state: STATE,
               lead_type: "Lis Pendens",
               owner_name: prop.ownerName || caseName || null,
-              address: prop.address, city: prop.city || "Kansas City", zip: prop.zip || null,
-              mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+              address: prop.address,
+              city: prop.city || "Kansas City",
+              zip: prop.zip || null,
+              mailing_address: null,
+              mailing_city: null,
+              mailing_state: null,
+              mailing_zip: null,
               case_number: caseNum,
               filing_date: formatDate(filedDate),
-              assessed_value: null, tax_year: null,
-              lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+              assessed_value: null,
+              tax_year: null,
+              lender: null,
+              loan_amount: null,
+              sale_date: null,
+              sale_amount: null,
               description: `${name} County MO Lis Pendens — ${caseName}`,
               source_url: url,
               raw_data: JSON.stringify({ caseNum, caseName, filedDate, parcelId: prop.parcelId }),
@@ -725,8 +831,8 @@ async function scrapeLisPendens(fromDate: string, toDate: string): Promise<Lead[
 async function scrapeMOProbate(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
   const counties = [
-    { name: "Clay",   code: "12", city: "Liberty" },
-    { name: "Cass",   code: "7",  city: "Harrisonville" },
+    { name: "Clay", code: "12", city: "Liberty" },
+    { name: "Cass", code: "7", city: "Harrisonville" },
     { name: "Platte", code: "25", city: "Platte City" },
   ];
   const url = `https://www.courts.mo.gov/casenet/cases/searchCases.do`;
@@ -735,7 +841,8 @@ async function scrapeMOProbate(fromDate: string, toDate: string): Promise<Lead[]
       const body = new URLSearchParams({
         countyCode: code,
         caseType: "P",
-        fromDate, toDate,
+        fromDate,
+        toDate,
         submit: "Search",
       }).toString();
       const res = await fetchWithRetry(url, {
@@ -764,7 +871,9 @@ async function scrapeMOProbate(fromDate: string, toDate: string): Promise<Lead[]
       const CONCURRENCY = 5;
       for (let i = 0; i < cases.length; i += CONCURRENCY) {
         const batch = cases.slice(i, i + CONCURRENCY);
-        const results = await Promise.all(batch.map(c => lookupOwnerProperties(c.caseName, name, STATE)));
+        const results = await Promise.all(
+          batch.map((c) => lookupOwnerProperties(c.caseName, name, STATE)),
+        );
         for (let j = 0; j < batch.length; j++) {
           const { caseNum, caseName, filedDate } = batch[j];
           const properties = results[j];
@@ -772,15 +881,25 @@ async function scrapeMOProbate(fromDate: string, toDate: string): Promise<Lead[]
           for (const prop of properties) {
             leads.push({
               id: makeId(name, STATE, "Probate", `${caseNum}-${prop.address}`),
-              county: name, state: STATE,
+              county: name,
+              state: STATE,
               lead_type: "Probate/Estate",
               owner_name: prop.ownerName || caseName || null,
-              address: prop.address, city: prop.city || city, zip: prop.zip || null,
-              mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+              address: prop.address,
+              city: prop.city || city,
+              zip: prop.zip || null,
+              mailing_address: null,
+              mailing_city: null,
+              mailing_state: null,
+              mailing_zip: null,
               case_number: caseNum,
               filing_date: formatDate(filedDate),
-              assessed_value: null, tax_year: null,
-              lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+              assessed_value: null,
+              tax_year: null,
+              lender: null,
+              loan_amount: null,
+              sale_date: null,
+              sale_amount: null,
               description: `${name} County MO Probate — ${caseName}`,
               source_url: url,
               raw_data: JSON.stringify({ caseNum, caseName, filedDate, parcelId: prop.parcelId }),
@@ -800,9 +919,9 @@ async function scrapeMODivorce(fromDate: string, toDate: string): Promise<Lead[]
   const leads: Lead[] = [];
   const counties = [
     { name: "Jackson", code: "16", city: "Kansas City" },
-    { name: "Clay",    code: "12", city: "Liberty" },
-    { name: "Cass",    code: "7",  city: "Harrisonville" },
-    { name: "Platte",  code: "25", city: "Platte City" },
+    { name: "Clay", code: "12", city: "Liberty" },
+    { name: "Cass", code: "7", city: "Harrisonville" },
+    { name: "Platte", code: "25", city: "Platte City" },
   ];
   const url = `https://www.courts.mo.gov/casenet/cases/searchCases.do`;
   for (const { name, code, city } of counties) {
@@ -810,7 +929,8 @@ async function scrapeMODivorce(fromDate: string, toDate: string): Promise<Lead[]
       const body = new URLSearchParams({
         countyCode: code,
         caseType: "D",
-        fromDate, toDate,
+        fromDate,
+        toDate,
         submit: "Search",
       }).toString();
       const res = await fetchWithRetry(url, {
@@ -839,7 +959,9 @@ async function scrapeMODivorce(fromDate: string, toDate: string): Promise<Lead[]
       const CONCURRENCY = 5;
       for (let i = 0; i < cases.length; i += CONCURRENCY) {
         const batch = cases.slice(i, i + CONCURRENCY);
-        const results = await Promise.all(batch.map(c => lookupOwnerProperties(c.caseName, name, STATE)));
+        const results = await Promise.all(
+          batch.map((c) => lookupOwnerProperties(c.caseName, name, STATE)),
+        );
         for (let j = 0; j < batch.length; j++) {
           const { caseNum, caseName, filedDate } = batch[j];
           const properties = results[j];
@@ -847,15 +969,25 @@ async function scrapeMODivorce(fromDate: string, toDate: string): Promise<Lead[]
           for (const prop of properties) {
             leads.push({
               id: makeId(name, STATE, "Divorce", `${caseNum}-${prop.address}`),
-              county: name, state: STATE,
+              county: name,
+              state: STATE,
               lead_type: "Divorce",
               owner_name: prop.ownerName || caseName || null,
-              address: prop.address, city: prop.city || city, zip: prop.zip || null,
-              mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+              address: prop.address,
+              city: prop.city || city,
+              zip: prop.zip || null,
+              mailing_address: null,
+              mailing_city: null,
+              mailing_state: null,
+              mailing_zip: null,
               case_number: caseNum,
               filing_date: formatDate(filedDate),
-              assessed_value: null, tax_year: null,
-              lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+              assessed_value: null,
+              tax_year: null,
+              lender: null,
+              loan_amount: null,
+              sale_date: null,
+              sale_amount: null,
               description: `${name} County MO Divorce — ${caseName}`,
               source_url: url,
               raw_data: JSON.stringify({ caseNum, caseName, filedDate, parcelId: prop.parcelId }),
@@ -886,10 +1018,14 @@ async function scrapeMOObituaries(fromDate: string, toDate: string): Promise<Lea
         const xml = await res.text();
         const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
         for (const item of items) {
-          const title = (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) || item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
-          const link = (item.match(/<link>(.+?)<\/link>/))?.[1]?.trim() || "";
-          const pubDate = (item.match(/<pubDate>(.+?)<\/pubDate>/))?.[1]?.trim() || "";
-          const desc = (item.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/) || item.match(/<description>([\s\S]*?)<\/description>/))?.[1]?.trim() || "";
+          const title =
+            (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) ||
+              item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
+          const link = item.match(/<link>(.+?)<\/link>/)?.[1]?.trim() || "";
+          const pubDate = item.match(/<pubDate>(.+?)<\/pubDate>/)?.[1]?.trim() || "";
+          const desc =
+            (item.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/) ||
+              item.match(/<description>([\s\S]*?)<\/description>/))?.[1]?.trim() || "";
           if (!title) continue;
           // Filter to date range
           if (pubDate) {
@@ -901,21 +1037,35 @@ async function scrapeMOObituaries(fromDate: string, toDate: string): Promise<Lea
           }
           leads.push({
             id: makeId("Jackson", STATE, "Obituary", link || title),
-            county: "Jackson", state: STATE,
+            county: "Jackson",
+            state: STATE,
             lead_type: "Obituary",
             owner_name: title || null,
-            address: null, city: "Kansas City", zip: null,
-            mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+            address: null,
+            city: "Kansas City",
+            zip: null,
+            mailing_address: null,
+            mailing_city: null,
+            mailing_state: null,
+            mailing_zip: null,
             case_number: null,
-            filing_date: pubDate ? formatDate(new Date(pubDate).toISOString().slice(0, 10)) : formatDate(fromDate),
-            assessed_value: null, tax_year: null,
-            lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+            filing_date: pubDate
+              ? formatDate(new Date(pubDate).toISOString().slice(0, 10))
+              : formatDate(fromDate),
+            assessed_value: null,
+            tax_year: null,
+            lender: null,
+            loan_amount: null,
+            sale_date: null,
+            sale_amount: null,
             description: desc.replace(/<[^>]+>/g, "").slice(0, 200) || `Obituary — ${title}`,
             source_url: link || rssUrl,
             raw_data: JSON.stringify({ title, pubDate }),
           });
         }
-      } catch { /* try next URL */ }
+      } catch {
+        /* try next URL */
+      }
     }
 
     // Enrich obituaries with property lookup by decedent name — 5 concurrent
@@ -924,7 +1074,9 @@ async function scrapeMOObituaries(fromDate: string, toDate: string): Promise<Lea
     const CONCURRENCY_O = 5;
     for (let i = 0; i < leads.length; i += CONCURRENCY_O) {
       const batch = leads.slice(i, i + CONCURRENCY_O);
-      const results = await Promise.all(batch.map(l => lookupOwnerProperties(l.owner_name || '', 'Jackson', STATE)));
+      const results = await Promise.all(
+        batch.map((l) => lookupOwnerProperties(l.owner_name || "", "Jackson", STATE)),
+      );
       for (let j = 0; j < batch.length; j++) {
         const properties = results[j];
         if (properties.length === 0) continue;
@@ -932,18 +1084,20 @@ async function scrapeMOObituaries(fromDate: string, toDate: string): Promise<Lea
         for (const prop of properties) {
           enrichedObitLeads.push({
             ...lead,
-            id: makeId('Jackson', STATE, 'Obituary', `${lead.owner_name || ''}-${prop.address}`),
+            id: makeId("Jackson", STATE, "Obituary", `${lead.owner_name || ""}-${prop.address}`),
             address: prop.address,
-            city: prop.city || 'Kansas City',
+            city: prop.city || "Kansas City",
             zip: prop.zip || null,
             owner_name: prop.ownerName || lead.owner_name,
-            raw_data: JSON.stringify({ ...JSON.parse(lead.raw_data || '{}'), parcelId: prop.parcelId }),
+            raw_data: JSON.stringify({
+              ...JSON.parse(lead.raw_data || "{}"),
+              parcelId: prop.parcelId,
+            }),
           });
         }
       }
     }
     return enrichedObitLeads;
-
   } catch (e) {
     console.error(`[MO] Obituaries error:`, e);
   }
@@ -966,21 +1120,31 @@ async function scrapeMOWaterShutoffs(fromDate: string, toDate: string): Promise<
       console.error(`[MO] Water Shutoffs fetch failed: HTTP ${res.status}`);
     }
     if (res.ok) {
-      const data = await res.json() as Record<string, string>[];
+      const data = (await res.json()) as Record<string, string>[];
       for (const item of data) {
         const address = item.incident_address || "";
         if (!address) continue;
         leads.push({
           id: makeId("Jackson", STATE, "Water Shutoff", item.workorder_ || address),
-          county: "Jackson", state: STATE,
+          county: "Jackson",
+          state: STATE,
           lead_type: "Water Shutoff",
           owner_name: null,
-          address: address || null, city: "Kansas City", zip: null,
-          mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+          address: address || null,
+          city: "Kansas City",
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
           case_number: item.workorder_ || null,
           filing_date: formatDate(item.open_date_time?.slice(0, 10) || fromDate),
-          assessed_value: null, tax_year: null,
-          lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
           description: `Water Shutoff — No Water — ${address}`,
           source_url: "https://data.kcmo.org/311/311-Call-Center-Reported-Issues/d4px-6rwg",
           raw_data: JSON.stringify(item),
@@ -993,15 +1157,20 @@ async function scrapeMOWaterShutoffs(fromDate: string, toDate: string): Promise<
     const unenrichedAddr = leads.filter((l) => !l.owner_name && l.address).slice(0, 40);
     for (let i = 0; i < unenrichedAddr.length; i += CONCURRENCY_ADDR) {
       const batch = unenrichedAddr.slice(i, i + CONCURRENCY_ADDR);
-      const results = await Promise.all(batch.map((l) => lookupByAddress(l.address!, l.county, STATE)));
+      const results = await Promise.all(
+        batch.map((l) => lookupByAddress(l.address!, l.county, STATE)),
+      );
       for (let j = 0; j < batch.length; j++) {
         const prop = results[j];
         if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
         if (prop?.zip && !batch[j].zip) batch[j].zip = prop.zip;
-        if (prop?.parcelId) batch[j].raw_data = JSON.stringify({ ...JSON.parse(batch[j].raw_data || "{}"), parcelId: prop.parcelId });
+        if (prop?.parcelId)
+          batch[j].raw_data = JSON.stringify({
+            ...JSON.parse(batch[j].raw_data || "{}"),
+            parcelId: prop.parcelId,
+          });
       }
     }
-
   } catch (e) {
     console.error(`[MO] Water Shutoffs error:`, e);
   }
@@ -1023,21 +1192,31 @@ async function scrapeMOFireDamage(fromDate: string, toDate: string): Promise<Lea
       console.error(`[MO] Fire Damage fetch failed: HTTP ${res.status}`);
     }
     if (res.ok) {
-      const data = await res.json() as Record<string, string>[];
+      const data = (await res.json()) as Record<string, string>[];
       for (const item of data) {
         const address = item.incident_address || "";
         if (!address) continue;
         leads.push({
           id: makeId("Jackson", STATE, "Fire Damage", item.workorder_ || address),
-          county: "Jackson", state: STATE,
+          county: "Jackson",
+          state: STATE,
           lead_type: "Fire Damage",
           owner_name: null,
-          address: address || null, city: "Kansas City", zip: null,
-          mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+          address: address || null,
+          city: "Kansas City",
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
           case_number: item.workorder_ || null,
           filing_date: formatDate(item.open_date_time?.slice(0, 10) || fromDate),
-          assessed_value: null, tax_year: null,
-          lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
           description: `Fire Damage — ${item.issue_type || "Dangerous Building"} — ${address}`,
           source_url: "https://data.kcmo.org/311/311-Call-Center-Reported-Issues/d4px-6rwg",
           raw_data: JSON.stringify(item),
@@ -1050,15 +1229,20 @@ async function scrapeMOFireDamage(fromDate: string, toDate: string): Promise<Lea
     const unenrichedAddr = leads.filter((l) => !l.owner_name && l.address).slice(0, 40);
     for (let i = 0; i < unenrichedAddr.length; i += CONCURRENCY_ADDR) {
       const batch = unenrichedAddr.slice(i, i + CONCURRENCY_ADDR);
-      const results = await Promise.all(batch.map((l) => lookupByAddress(l.address!, l.county, STATE)));
+      const results = await Promise.all(
+        batch.map((l) => lookupByAddress(l.address!, l.county, STATE)),
+      );
       for (let j = 0; j < batch.length; j++) {
         const prop = results[j];
         if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
         if (prop?.zip && !batch[j].zip) batch[j].zip = prop.zip;
-        if (prop?.parcelId) batch[j].raw_data = JSON.stringify({ ...JSON.parse(batch[j].raw_data || "{}"), parcelId: prop.parcelId });
+        if (prop?.parcelId)
+          batch[j].raw_data = JSON.stringify({
+            ...JSON.parse(batch[j].raw_data || "{}"),
+            parcelId: prop.parcelId,
+          });
       }
     }
-
   } catch (e) {
     console.error(`[MO] Fire Damage error:`, e);
   }
@@ -1074,21 +1258,31 @@ async function scrapeMOVacantAbandoned(fromDate: string, toDate: string): Promis
     const url = `https://data.kcmo.org/resource/d4px-6rwg.json?$where=open_date_time>='${fromDate}T00:00:00' AND issue_type='Property Violations' AND issue_sub_type like '%Vacant%'&$limit=500&$order=open_date_time DESC`;
     const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
     if (!res.ok) return leads;
-    const data = await res.json() as Record<string, string>[];
+    const data = (await res.json()) as Record<string, string>[];
     for (const item of data) {
       const address = item.incident_address || "";
       if (!address) continue;
       leads.push({
         id: makeId("Jackson", STATE, "Vacant Abandoned", item.workorder_ || address),
-        county: "Jackson", state: STATE,
+        county: "Jackson",
+        state: STATE,
         lead_type: "Vacant/Abandoned",
         owner_name: null,
-        address: address || null, city: "Kansas City", zip: null,
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+        address: address || null,
+        city: "Kansas City",
+        zip: null,
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
         case_number: item.workorder_ || null,
         filing_date: formatDate(item.open_date_time?.slice(0, 10) || fromDate),
-        assessed_value: null, tax_year: null,
-        lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
+        sale_date: null,
+        sale_amount: null,
         description: `Vacant/Abandoned — ${item.issue_sub_type || "Vacant Property"} — ${address}`,
         source_url: "https://data.kcmo.org/311/311-Call-Center-Reported-Issues/d4px-6rwg",
         raw_data: JSON.stringify(item),
@@ -1097,18 +1291,23 @@ async function scrapeMOVacantAbandoned(fromDate: string, toDate: string): Promis
 
     // Enrich with owner name via assessor address lookup — 10 concurrent
     const CONCURRENCY_ADDR = 10;
-    const unenrichedAddr = leads.filter(l => !l.owner_name && l.address);
+    const unenrichedAddr = leads.filter((l) => !l.owner_name && l.address);
     for (let i = 0; i < unenrichedAddr.length; i += CONCURRENCY_ADDR) {
       const batch = unenrichedAddr.slice(i, i + CONCURRENCY_ADDR);
-      const results = await Promise.all(batch.map(l => lookupByAddress(l.address!, l.county, STATE)));
+      const results = await Promise.all(
+        batch.map((l) => lookupByAddress(l.address!, l.county, STATE)),
+      );
       for (let j = 0; j < batch.length; j++) {
         const prop = results[j];
         if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
         if (prop?.zip && !batch[j].zip) batch[j].zip = prop.zip;
-        if (prop?.parcelId) batch[j].raw_data = JSON.stringify({ ...JSON.parse(batch[j].raw_data || '{}'), parcelId: prop.parcelId });
+        if (prop?.parcelId)
+          batch[j].raw_data = JSON.stringify({
+            ...JSON.parse(batch[j].raw_data || "{}"),
+            parcelId: prop.parcelId,
+          });
       }
     }
-
   } catch (e) {
     console.error(`[MO] Vacant/Abandoned error:`, e);
   }
@@ -1125,14 +1324,24 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
     const COUNTY = "Jackson"; // Western MO district covers KC/Jackson area
     const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
     // Parse all items first
-    type BkItem = { title: string; link: string; pubDate: string; caseNum: string; caseName: string };
+    type BkItem = {
+      title: string;
+      link: string;
+      pubDate: string;
+      caseNum: string;
+      caseName: string;
+    };
     const bkItems: BkItem[] = [];
     for (const item of items) {
-      const title = (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) || item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
-      const link  = (item.match(/<link>(.+?)<\/link>/))?.[1]?.trim() || "";
-      const desc  = (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) || item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
-      const pubDate = (item.match(/<pubDate>(.+?)<\/pubDate>/))?.[1]?.trim() || "";
-      const caseNum = (title.match(/([0-9]{2}-[0-9]{5})/)?.[1]) || title;
+      const title =
+        (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) ||
+          item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
+      const link = item.match(/<link>(.+?)<\/link>/)?.[1]?.trim() || "";
+      const desc =
+        (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) ||
+          item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
+      const pubDate = item.match(/<pubDate>(.+?)<\/pubDate>/)?.[1]?.trim() || "";
+      const caseNum = title.match(/([0-9]{2}-[0-9]{5})/)?.[1] || title;
       if (pubDate) {
         const d = new Date(pubDate);
         if (!isNaN(d.getTime())) {
@@ -1144,7 +1353,12 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
       }
       // Strip full case prefix including chapter suffix: e.g. "26-40368-btf13 " or "26-30205-7 "
       const ownerFromTitle = title.replace(/^[0-9]{2}-[0-9]{5}(-[a-zA-Z0-9]+)?\s*/, "").trim();
-      const caseName = ownerFromTitle || desc.replace(/<[^>]+>/g, "").replace(/&[a-z0-9#]+;/g, "").trim();
+      const caseName =
+        ownerFromTitle ||
+        desc
+          .replace(/<[^>]+>/g, "")
+          .replace(/&[a-z0-9#]+;/g, "")
+          .trim();
       bkItems.push({ title, link, pubDate, caseNum, caseName });
     }
     const MAX_BK_ITEMS = 10;
@@ -1154,7 +1368,7 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
     for (let i = 0; i < itemsToProcess.length; i += CONCURRENCY) {
       const batch = itemsToProcess.slice(i, i + CONCURRENCY);
       const results = await Promise.all(
-        batch.map(b => lookupOwnerProperties(b.caseName, COUNTY, STATE))
+        batch.map((b) => lookupOwnerProperties(b.caseName, COUNTY, STATE)),
       );
       for (let j = 0; j < batch.length; j++) {
         const { title, link, pubDate, caseNum, caseName } = batch[j];
@@ -1167,15 +1381,32 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
             state: STATE,
             lead_type: "Bankruptcy",
             owner_name: caseName || caseNum,
-            address: prop.address, city: prop.city || "", zip: prop.zip || null,
-            mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+            address: prop.address,
+            city: prop.city || "",
+            zip: prop.zip || null,
+            mailing_address: null,
+            mailing_city: null,
+            mailing_state: null,
+            mailing_zip: null,
             case_number: caseNum,
-            filing_date: pubDate ? formatDate(new Date(pubDate).toISOString().slice(0, 10)) : formatDate(fromDate),
-            assessed_value: null, tax_year: null,
-            lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+            filing_date: pubDate
+              ? formatDate(new Date(pubDate).toISOString().slice(0, 10))
+              : formatDate(fromDate),
+            assessed_value: null,
+            tax_year: null,
+            lender: null,
+            loan_amount: null,
+            sale_date: null,
+            sale_amount: null,
             source_url: link || "https://ecf.mowb.uscourts.gov/cgi-bin/rss_outside.pl",
             description: `MO Bankruptcy — ${caseName || caseNum}`,
-            raw_data: JSON.stringify({ title, caseNum, caseName, pubDate, parcelId: prop.parcelId }),
+            raw_data: JSON.stringify({
+              title,
+              caseNum,
+              caseName,
+              pubDate,
+              parcelId: prop.parcelId,
+            }),
           });
         }
       }
@@ -1227,7 +1458,10 @@ export async function scrapeCounty(
   const wants = (type: string) => types.includes(type);
   const fns: Array<() => Promise<Lead[]>> = [];
 
-  if (countyBulk[norm] && (!leadTypes?.length || wants("Sheriff Sale") || wants("Tax Delinquent"))) {
+  if (
+    countyBulk[norm] &&
+    (!leadTypes?.length || wants("Sheriff Sale") || wants("Tax Delinquent"))
+  ) {
     fns.push(countyBulk[norm]);
   }
 
@@ -1249,8 +1483,8 @@ export async function scrapeCounty(
 export async function scrapeAll(fromDate: string, toDate: string): Promise<Lead[]> {
   const results = await Promise.allSettled([
     // Pre-Foreclosure / Lis Pendens
-    scrapeJacksonPreForeclosure(fromDate, toDate),  // Jackson Recorder of Deeds
-    scrapeLisPendens(fromDate, toDate),             // Case.net Lis Pendens (all 4 counties)
+    scrapeJacksonPreForeclosure(fromDate, toDate), // Jackson Recorder of Deeds
+    scrapeLisPendens(fromDate, toDate), // Case.net Lis Pendens (all 4 counties)
     // Tax Delinquent
     scrapeJacksonTaxDelinquent(fromDate, toDate),
     // Sheriff Sales
@@ -1275,5 +1509,5 @@ export async function scrapeAll(fromDate: string, toDate: string): Promise<Lead[
     // Obituaries
     scrapeMOObituaries(fromDate, toDate),
   ]);
-  return results.flatMap(r => r.status === "fulfilled" ? r.value : []);
+  return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
 }

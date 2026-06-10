@@ -1,9 +1,5 @@
 import { Router, type IRouter } from "express";
-import {
-  loginHandler,
-  meHandler,
-  signupHandler,
-} from "../../../controllers/auth.controller.js";
+import { loginHandler, meHandler, signupHandler } from "../../../controllers/auth.controller.js";
 import { jwtAuthMiddleware } from "../../../middleware/jwt-auth.js";
 import { validate } from "../../../middleware/validate.js";
 import { loginSchema, signupSchema } from "../../../schemas/auth.schema.js";

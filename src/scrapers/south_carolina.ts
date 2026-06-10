@@ -25,7 +25,7 @@ const ACCLAIM_BASE = "https://acclaimweb.horrycounty.org/AcclaimWeb";
 // AcclaimWeb document type IDs confirmed working
 const ACCLAIM_DOC_TYPES = {
   LIS_PENDENS_DEED: { id: 132, label: "LIS PENDENS DEED (135)" },
-  LIS_PENDENS_MTG:  { id: 210, label: "LIS PENDENS MTG (138)" },
+  LIS_PENDENS_MTG: { id: 210, label: "LIS PENDENS MTG (138)" },
   NOTICE_OF_FORECLOSURE: { id: 137, label: "NOTICE OF FORECLOSURE (143)" },
 };
 
@@ -33,12 +33,12 @@ async function acclaimWebSearch(
   docTypeId: number,
   docTypeLabel: string,
   acclaimFrom: string, // MM/DD/YYYY
-  acclaimTo: string    // MM/DD/YYYY
+  acclaimTo: string, // MM/DD/YYYY
 ): Promise<any[]> {
   try {
     // Step 1: Get session cookie from disclaimer page
     const initRes = await fetchWithRetry(
-      `${ACCLAIM_BASE}/search/Disclaimer?st=/AcclaimWeb/search/SearchTypeDocType`
+      `${ACCLAIM_BASE}/search/Disclaimer?st=/AcclaimWeb/search/SearchTypeDocType`,
     );
     if (!initRes.ok) return [];
 
@@ -71,18 +71,15 @@ async function acclaimWebSearch(
       RecordDateTo: acclaimTo,
     });
 
-    const searchRes = await fetchWithRetry(
-      `${ACCLAIM_BASE}/search/SearchTypeDocType`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Cookie: cookieHeader,
-          Referer: `${ACCLAIM_BASE}/search/SearchTypeDocType`,
-        },
-        body: searchBody.toString(),
-      }
-    );
+    const searchRes = await fetchWithRetry(`${ACCLAIM_BASE}/search/SearchTypeDocType`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader,
+        Referer: `${ACCLAIM_BASE}/search/SearchTypeDocType`,
+      },
+      body: searchBody.toString(),
+    });
     if (!searchRes.ok) return [];
 
     // Step 4: Fetch grid results via AJAX (session holds search criteria)
@@ -129,14 +126,24 @@ async function scrapeHorryPreForeclosure(fromDate: string, toDate: string): Prom
 
   // Fetch LIS PENDENS DEED + LIS PENDENS MTG in parallel
   const [lisDeed, lisMtg] = await Promise.all([
-    acclaimWebSearch(ACCLAIM_DOC_TYPES.LIS_PENDENS_DEED.id, ACCLAIM_DOC_TYPES.LIS_PENDENS_DEED.label, acclaimFrom, acclaimTo),
-    acclaimWebSearch(ACCLAIM_DOC_TYPES.LIS_PENDENS_MTG.id, ACCLAIM_DOC_TYPES.LIS_PENDENS_MTG.label, acclaimFrom, acclaimTo),
+    acclaimWebSearch(
+      ACCLAIM_DOC_TYPES.LIS_PENDENS_DEED.id,
+      ACCLAIM_DOC_TYPES.LIS_PENDENS_DEED.label,
+      acclaimFrom,
+      acclaimTo,
+    ),
+    acclaimWebSearch(
+      ACCLAIM_DOC_TYPES.LIS_PENDENS_MTG.id,
+      ACCLAIM_DOC_TYPES.LIS_PENDENS_MTG.label,
+      acclaimFrom,
+      acclaimTo,
+    ),
   ]);
 
   for (const rec of [...lisDeed, ...lisMtg]) {
     const name = rec.DirectName || rec.IndirectName || null;
     const caseMatch = (rec.Comments || "").match(/(?:case|c\/a\s*no\.?|no\.?)\s*([\w\d\s\-]+)/i);
-    const caseNumber = caseMatch ? caseMatch[1].trim() : (rec.BookPage || null);
+    const caseNumber = caseMatch ? caseMatch[1].trim() : rec.BookPage || null;
     const recordDate = acclaimDateToIso(rec.RecordDate);
 
     leads.push({
@@ -180,7 +187,7 @@ async function scrapeHorryForeclosure(fromDate: string, toDate: string): Promise
     ACCLAIM_DOC_TYPES.NOTICE_OF_FORECLOSURE.id,
     ACCLAIM_DOC_TYPES.NOTICE_OF_FORECLOSURE.label,
     acclaimFrom,
-    acclaimTo
+    acclaimTo,
   );
 
   for (const rec of records) {
@@ -322,10 +329,10 @@ async function scrapeHorryProbate(fromDate: string, toDate: string): Promise<Lea
       body: new URLSearchParams({
         __VIEWSTATE: viewstate,
         __EVENTVALIDATION: eventvalidation || "",
-        "ctl00$ContentPlaceHolder1$ddlCaseType": "ESTATE",
-        "ctl00$ContentPlaceHolder1$txtFiledDateFrom": fromDate,
-        "ctl00$ContentPlaceHolder1$txtFiledDateTo": toDate,
-        "ctl00$ContentPlaceHolder1$btnSearch": "Search",
+        ctl00$ContentPlaceHolder1$ddlCaseType: "ESTATE",
+        ctl00$ContentPlaceHolder1$txtFiledDateFrom: fromDate,
+        ctl00$ContentPlaceHolder1$txtFiledDateTo: toDate,
+        ctl00$ContentPlaceHolder1$btnSearch: "Search",
       }).toString(),
     });
 
@@ -459,10 +466,10 @@ async function scrapeGeorgetownCounty(fromDate: string, toDate: string): Promise
         body: new URLSearchParams({
           __VIEWSTATE: viewstate,
           __EVENTVALIDATION: eventvalidation || "",
-          "ctl00$ContentPlaceHolder1$ddlCaseType": caseType,
-          "ctl00$ContentPlaceHolder1$txtFiledDateFrom": fromDate,
-          "ctl00$ContentPlaceHolder1$txtFiledDateTo": toDate,
-          "ctl00$ContentPlaceHolder1$btnSearch": "Search",
+          ctl00$ContentPlaceHolder1$ddlCaseType: caseType,
+          ctl00$ContentPlaceHolder1$txtFiledDateFrom: fromDate,
+          ctl00$ContentPlaceHolder1$txtFiledDateTo: toDate,
+          ctl00$ContentPlaceHolder1$btnSearch: "Search",
         }).toString(),
       });
 
@@ -594,10 +601,10 @@ async function scrapeMarionCounty(fromDate: string, toDate: string): Promise<Lea
         body: new URLSearchParams({
           __VIEWSTATE: viewstate,
           __EVENTVALIDATION: eventvalidation || "",
-          "ctl00$ContentPlaceHolder1$ddlCaseType": caseType,
-          "ctl00$ContentPlaceHolder1$txtFiledDateFrom": fromDate,
-          "ctl00$ContentPlaceHolder1$txtFiledDateTo": toDate,
-          "ctl00$ContentPlaceHolder1$btnSearch": "Search",
+          ctl00$ContentPlaceHolder1$ddlCaseType: caseType,
+          ctl00$ContentPlaceHolder1$txtFiledDateFrom: fromDate,
+          ctl00$ContentPlaceHolder1$txtFiledDateTo: toDate,
+          ctl00$ContentPlaceHolder1$btnSearch: "Search",
         }).toString(),
       });
 
@@ -701,9 +708,11 @@ export async function scrapeFSBO(fromDate: string, toDate: string): Promise<Lead
   for (const city of cities) {
     try {
       const url = `https://${city.replace(" ", "")}.craigslist.org/search/reo?format=json&sort=date&query=for+sale+by+owner`;
-      const res = await fetchWithRetry(url, { headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" } });
+      const res = await fetchWithRetry(url, {
+        headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" },
+      });
       if (!res.ok) continue;
-      const data = await res.json() as { items?: unknown[] };
+      const data = (await res.json()) as { items?: unknown[] };
       const items = data?.items || [];
       for (const item of items as Record<string, unknown>[]) {
         const title = String(item.Title || item.title || "");
@@ -720,12 +729,20 @@ export async function scrapeFSBO(fromDate: string, toDate: string): Promise<Lead
           address: null,
           city: city,
           zip: null,
-          mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
           case_number: null,
-          filing_date: posted ? formatDate(new Date(posted).toISOString().slice(0,10)) : formatDate(fromDate),
+          filing_date: posted
+            ? formatDate(new Date(posted).toISOString().slice(0, 10))
+            : formatDate(fromDate),
           assessed_value: price || null,
           tax_year: null,
-          lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
           description: `FSBO — ${title}`,
           source_url: url2 || url,
           raw_data: JSON.stringify({ title, price, posted }),
@@ -746,27 +763,46 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
     const xml = await rss.text();
     const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
     for (const item of items) {
-      const title = (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) || item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
-      const link  = (item.match(/<link>(.+?)<\/link>/))?.[1]?.trim() || "";
-      const desc  = (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) || item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
-      const pubDate = (item.match(/<pubDate>(.+?)<\/pubDate>/))?.[1]?.trim() || "";
-      const caseNum = (title.match(/([0-9]{2}-[0-9]{5})/)?.[1]) || title;
+      const title =
+        (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) ||
+          item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
+      const link = item.match(/<link>(.+?)<\/link>/)?.[1]?.trim() || "";
+      const desc =
+        (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) ||
+          item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
+      const pubDate = item.match(/<pubDate>(.+?)<\/pubDate>/)?.[1]?.trim() || "";
+      const caseNum = title.match(/([0-9]{2}-[0-9]{5})/)?.[1] || title;
       // Extract owner name from title: "26-70730-13 Jesse Ray Evin Keeton" -> "Jesse Ray Evin Keeton"
       const ownerFromTitle = title.replace(/^[0-9]{2}-[0-9]{5}(-[0-9]+)?\s*/, "").trim();
-      const caseName = ownerFromTitle || desc.replace(/<[^>]+>/g, "").replace(/&[a-z0-9#]+;/g, "").trim();
+      const caseName =
+        ownerFromTitle ||
+        desc
+          .replace(/<[^>]+>/g, "")
+          .replace(/&[a-z0-9#]+;/g, "")
+          .trim();
       leads.push({
         id: makeId("SC", "SC", "Bankruptcy", caseNum),
         county: "SC",
         state: "SC",
         lead_type: "Bankruptcy",
         owner_name: caseName || caseNum,
-        address: "", city: "", zip: "",
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+        address: "",
+        city: "",
+        zip: "",
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
         case_number: caseNum,
-        filing_date: pubDate ? formatDate(new Date(pubDate).toISOString().slice(0,10)) : formatDate(fromDate),
-        assessed_value: null, tax_year: null,
-        lender: null, loan_amount: null,
-        sale_date: null, sale_amount: null,
+        filing_date: pubDate
+          ? formatDate(new Date(pubDate).toISOString().slice(0, 10))
+          : formatDate(fromDate),
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
+        sale_date: null,
+        sale_amount: null,
         source_url: link || "https://ecf.scb.uscourts.gov/cgi-bin/rss_outside.pl",
         description: `SC Bankruptcy — ${caseName || caseNum}`,
         raw_data: JSON.stringify({ title, caseNum, caseName, pubDate }),
@@ -786,10 +822,16 @@ export async function scrapeObituaries(fromDate: string, toDate: string): Promis
     const res = await fetchWithRetry(url);
     if (!res.ok) return leads;
     const html = await res.text();
-    const nameMatches = Array.from(html.matchAll(/<span[^>]*class="[^"]*name[^"]*"[^>]*>([^<]+)<\/span>/gi));
-    const locationMatches = Array.from(html.matchAll(/([A-Z][a-z]+(?:\s[A-Z][a-z]+)*),\s*(?:SC|South Carolina)/g));
-    const names = nameMatches.map(m => m[1].trim()).filter(n => n.length > 3);
-    const linkMatches = Array.from(html.matchAll(/href="(\/us\/obituaries\/[^"]+)"/g)).map(m => `https://www.legacy.com${m[1]}`);
+    const nameMatches = Array.from(
+      html.matchAll(/<span[^>]*class="[^"]*name[^"]*"[^>]*>([^<]+)<\/span>/gi),
+    );
+    const locationMatches = Array.from(
+      html.matchAll(/([A-Z][a-z]+(?:\s[A-Z][a-z]+)*),\s*(?:SC|South Carolina)/g),
+    );
+    const names = nameMatches.map((m) => m[1].trim()).filter((n) => n.length > 3);
+    const linkMatches = Array.from(html.matchAll(/href="(\/us\/obituaries\/[^"]+)"/g)).map(
+      (m) => `https://www.legacy.com${m[1]}`,
+    );
     names.forEach((name, i) => {
       const location = locationMatches[i]?.[1] || "SC";
       leads.push({
@@ -798,13 +840,21 @@ export async function scrapeObituaries(fromDate: string, toDate: string): Promis
         state: "SC",
         lead_type: "Obituary",
         owner_name: name,
-        address: "", city: location, zip: "",
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+        address: "",
+        city: location,
+        zip: "",
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
         case_number: null,
         filing_date: formatDate(fromDate),
-        assessed_value: null, tax_year: null,
-        lender: null, loan_amount: null,
-        sale_date: null, sale_amount: null,
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
+        sale_date: null,
+        sale_amount: null,
         source_url: linkMatches[i] || url,
         description: `Obituary — ${name}, ${location}, SC. Potential estate/probate lead.`,
         raw_data: JSON.stringify({ name, location }),
@@ -816,7 +866,6 @@ export async function scrapeObituaries(fromDate: string, toDate: string): Promis
   return leads;
 }
 
-
 // ─── CODE VIOLATIONS — South Carolina municipal portals ─────────────────────────
 export async function scrapeCodeViolations(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
@@ -827,10 +876,13 @@ export async function scrapeCodeViolations(fromDate: string, toDate: string): Pr
       `?court=scd&date_filed__gte=${fromDate}&date_filed__lte=${toDate}` +
       `&nature_of_suit=440&order_by=-date_filed&page_size=50`;
     const res = await fetchWithRetry(url, {
-      headers: { "User-Agent": "Atlas/1.0 (atlas@easybuttonrealestate.com)", Accept: "application/json" },
+      headers: {
+        "User-Agent": "Atlas/1.0 (atlas@easybuttonrealestate.com)",
+        Accept: "application/json",
+      },
     });
     if (res.ok) {
-      const data = await res.json() as { results?: unknown[] };
+      const data = (await res.json()) as { results?: unknown[] };
       for (const r of (data?.results || []) as Record<string, unknown>[]) {
         const caseName = String(r.case_name || "");
         const caseNum = String(r.docket_number || "");
@@ -842,14 +894,25 @@ export async function scrapeCodeViolations(fromDate: string, toDate: string): Pr
           state: "SC",
           lead_type: "Code Violation",
           owner_name: caseName || null,
-          address: null, city: null, zip: null,
-          mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+          address: null,
+          city: null,
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
           case_number: caseNum || null,
           filing_date: formatDate(filedDate),
-          assessed_value: null, tax_year: null,
-          lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
           description: `Code Violation / Civil Rights — ${caseName || caseNum}`,
-          source_url: r.absolute_url ? `https://www.courtlistener.com${r.absolute_url}` : "https://www.courtlistener.com/",
+          source_url: r.absolute_url
+            ? `https://www.courtlistener.com${r.absolute_url}`
+            : "https://www.courtlistener.com/",
           raw_data: JSON.stringify({ caseName, caseNum, filedDate }),
         });
       }
@@ -870,10 +933,13 @@ export async function scrapeOutOfStateOwners(fromDate: string, toDate: string): 
       `?court=scd&date_filed__gte=${fromDate}&date_filed__lte=${toDate}` +
       `&nature_of_suit=290&order_by=-date_filed&page_size=50`;
     const res = await fetchWithRetry(url, {
-      headers: { "User-Agent": "Atlas/1.0 (atlas@easybuttonrealestate.com)", Accept: "application/json" },
+      headers: {
+        "User-Agent": "Atlas/1.0 (atlas@easybuttonrealestate.com)",
+        Accept: "application/json",
+      },
     });
     if (res.ok) {
-      const data = await res.json() as { results?: unknown[] };
+      const data = (await res.json()) as { results?: unknown[] };
       for (const r of (data?.results || []) as Record<string, unknown>[]) {
         const caseName = String(r.case_name || "");
         const caseNum = String(r.docket_number || "");
@@ -885,14 +951,25 @@ export async function scrapeOutOfStateOwners(fromDate: string, toDate: string): 
           state: "SC",
           lead_type: "Vacant/Abandoned",
           owner_name: caseName || null,
-          address: null, city: null, zip: null,
-          mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+          address: null,
+          city: null,
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
           case_number: caseNum || null,
           filing_date: formatDate(filedDate),
-          assessed_value: null, tax_year: null,
-          lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
           description: `Out-of-State Owner / Property Dispute — ${caseName || caseNum}`,
-          source_url: r.absolute_url ? `https://www.courtlistener.com${r.absolute_url}` : "https://www.courtlistener.com/",
+          source_url: r.absolute_url
+            ? `https://www.courtlistener.com${r.absolute_url}`
+            : "https://www.courtlistener.com/",
           raw_data: JSON.stringify({ caseName, caseNum, filedDate }),
         });
       }
@@ -912,26 +989,42 @@ export async function scrapeVacantAbandoned(fromDate: string, toDate: string): P
       const xml = await rssRes.text();
       const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
       for (const item of items) {
-        const title = (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) || item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
-        const link = (item.match(/<link>(.+?)<\/link>/))?.[1]?.trim() || "";
-        const pubDate = (item.match(/<pubDate>(.+?)<\/pubDate>/))?.[1]?.trim() || "";
-        const desc = (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) || item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
+        const title =
+          (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) ||
+            item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
+        const link = item.match(/<link>(.+?)<\/link>/)?.[1]?.trim() || "";
+        const pubDate = item.match(/<pubDate>(.+?)<\/pubDate>/)?.[1]?.trim() || "";
+        const desc =
+          (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) ||
+            item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
         if (!title) continue;
         const lower = (title + " " + desc).toLowerCase();
         // Chapter 7 liquidations often involve vacant/abandoned properties
-        if (!lower.includes("chapter 7") && !lower.includes("vacant") && !lower.includes("abandon")) continue;
+        if (!lower.includes("chapter 7") && !lower.includes("vacant") && !lower.includes("abandon"))
+          continue;
         leads.push({
           id: makeId("VAC", title, "SC", "vacant"),
           county: "SC",
           state: "SC",
           lead_type: "Vacant/Abandoned",
           owner_name: title.split(/\s+v\.?\s+/i)[0]?.trim() || title,
-          address: null, city: null, zip: null,
-          mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+          address: null,
+          city: null,
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
           case_number: null,
-          filing_date: pubDate ? formatDate(new Date(pubDate).toISOString().slice(0,10)) : formatDate(fromDate),
-          assessed_value: null, tax_year: null,
-          lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+          filing_date: pubDate
+            ? formatDate(new Date(pubDate).toISOString().slice(0, 10))
+            : formatDate(fromDate),
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
           description: `Vacant/Abandoned — Chapter 7 Liquidation — ${title}`,
           source_url: link || "https://ecf.scb.uscourts.gov/cgi-bin/rss_outside.pl",
           raw_data: JSON.stringify({ title, pubDate, desc }),
@@ -953,13 +1046,23 @@ export async function scrapeDivorce(fromDate: string, toDate: string): Promise<L
       const xml = await rssRes.text();
       const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
       for (const item of items) {
-        const title = (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) || item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
-        const link = (item.match(/<link>(.+?)<\/link>/))?.[1]?.trim() || "";
-        const pubDate = (item.match(/<pubDate>(.+?)<\/pubDate>/))?.[1]?.trim() || "";
-        const desc = (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) || item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
+        const title =
+          (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) ||
+            item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
+        const link = item.match(/<link>(.+?)<\/link>/)?.[1]?.trim() || "";
+        const pubDate = item.match(/<pubDate>(.+?)<\/pubDate>/)?.[1]?.trim() || "";
+        const desc =
+          (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) ||
+            item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
         if (!title) continue;
         const lower = (title + " " + desc).toLowerCase();
-        if (!lower.includes("matrimon") && !lower.includes("divorce") && !lower.includes("dissolution") && !lower.includes("evict")) continue;
+        if (
+          !lower.includes("matrimon") &&
+          !lower.includes("divorce") &&
+          !lower.includes("dissolution") &&
+          !lower.includes("evict")
+        )
+          continue;
         const parts = title.split(/\s+v\.?\s+/i);
         leads.push({
           id: makeId("DIV", title, "SC", "divorce"),
@@ -967,12 +1070,23 @@ export async function scrapeDivorce(fromDate: string, toDate: string): Promise<L
           state: "SC",
           lead_type: "Divorce",
           owner_name: parts.join(" & ") || title,
-          address: null, city: null, zip: null,
-          mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+          address: null,
+          city: null,
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
           case_number: null,
-          filing_date: pubDate ? formatDate(new Date(pubDate).toISOString().slice(0,10)) : formatDate(fromDate),
-          assessed_value: null, tax_year: null,
-          lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+          filing_date: pubDate
+            ? formatDate(new Date(pubDate).toISOString().slice(0, 10))
+            : formatDate(fromDate),
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
           description: `Divorce / Eviction — ${title}`,
           source_url: link || "https://ecf.scd.uscourts.gov/cgi-bin/rss_outside.pl",
           raw_data: JSON.stringify({ title, pubDate, desc }),
@@ -1001,8 +1115,6 @@ export async function scrapeAll(fromDate: string, toDate: string): Promise<Lead[
     scrapeOutOfStateOwners(fromDate, toDate),
     scrapeVacantAbandoned(fromDate, toDate),
     scrapeFSBO(fromDate, toDate),
-  
-  
   ]);
   return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
 }

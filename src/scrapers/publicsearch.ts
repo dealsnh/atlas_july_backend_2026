@@ -33,8 +33,8 @@
  * }
  */
 
-import { WebSocket } from 'ws';
-import { fetchWithRetry } from './base.js';
+import { WebSocket } from "ws";
+import { fetchWithRetry } from "./base.js";
 
 export interface PublicSearchDoc {
   docId: number;
@@ -62,20 +62,20 @@ export interface PublicSearchDoc {
 }
 
 function makeWorkspaceId(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  return Array.from({ length: 20 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  return Array.from({ length: 20 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
 }
 
 function makeCorrelationId(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = Math.random() * 16 | 0;
-    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
   });
 }
 
 function formatDateRange(fromDate: string, toDate: string): string {
   // Convert YYYY-MM-DD to YYYYMMDD
-  return `${fromDate.replace(/-/g, '')},${toDate.replace(/-/g, '')}`;
+  return `${fromDate.replace(/-/g, "")},${toDate.replace(/-/g, "")}`;
 }
 
 /**
@@ -95,23 +95,24 @@ export async function scrapePublicSearch(
   searchValue: string,
   fromDate: string,
   toDate: string,
-  department = 'RP',
-  maxDocs = 500
+  department = "RP",
+  maxDocs = 500,
 ): Promise<PublicSearchDoc[]> {
   const baseUrl = `https://${slug}.${stateCode}.publicsearch.us`;
   const wsUrl = `wss://${slug}.${stateCode}.publicsearch.us/ws`;
   const allDocs: PublicSearchDoc[] = [];
 
   // Step 1: GET the page to obtain authToken cookie
-  let authToken = '';
+  let authToken = "";
   try {
     const res = await fetchWithRetry(baseUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        "User-Agent":
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
     });
-    const setCookieHeader = res.headers.get('set-cookie') || '';
+    const setCookieHeader = res.headers.get("set-cookie") || "";
     const match = setCookieHeader.match(/authToken=([^;]+)/);
     if (match) {
       authToken = match[1];
@@ -168,7 +169,7 @@ interface WSQueryParams {
 function fetchPageViaWS(
   wsUrl: string,
   authToken: string,
-  params: WSQueryParams
+  params: WSQueryParams,
 ): Promise<PublicSearchDoc[]> {
   return new Promise((resolve) => {
     const workspaceID = makeWorkspaceId();
@@ -182,9 +183,10 @@ function fetchPageViaWS(
     try {
       ws = new WebSocket(wsUrl, {
         headers: {
-          'Cookie': `authToken=${authToken}`,
-          'Origin': wsUrl.replace('wss://', 'https://').replace('/ws', ''),
-          'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          Cookie: `authToken=${authToken}`,
+          Origin: wsUrl.replace("wss://", "https://").replace("/ws", ""),
+          "User-Agent":
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         },
       });
     } catch (e) {
@@ -193,9 +195,9 @@ function fetchPageViaWS(
       return;
     }
 
-    ws.on('open', () => {
+    ws.on("open", () => {
       const msg = {
-        type: '@kofile/FETCH_DOCUMENTS/v4',
+        type: "@kofile/FETCH_DOCUMENTS/v4",
         payload: {
           query: {
             limit: params.limit,
@@ -204,25 +206,25 @@ function fetchPageViaWS(
             keywordSearch: false,
             recordedDateRange: params.dateRange,
             searchOcrText: false,
-            searchType: 'quickSearch',
+            searchType: "quickSearch",
             searchValue: params.searchValue,
           },
           workspaceID,
         },
         authToken,
-        ip: '0.0.0.0',
+        ip: "0.0.0.0",
         correlationId,
         sync: true,
       };
       ws.send(JSON.stringify(msg));
     });
 
-    ws.on('message', (data: Buffer | string) => {
+    ws.on("message", (data: Buffer | string) => {
       try {
-        const str = typeof data === 'string' ? data : data.toString('utf8');
+        const str = typeof data === "string" ? data : data.toString("utf8");
         const msg = JSON.parse(str);
         if (
-          msg.type === '@kofile/FETCH_DOCUMENTS_FULFILLED/v6' &&
+          msg.type === "@kofile/FETCH_DOCUMENTS_FULFILLED/v6" &&
           msg.correlationId === correlationId
         ) {
           clearTimeout(timeout);
@@ -234,12 +236,12 @@ function fetchPageViaWS(
             .filter(Boolean)
             .map((doc: any) => ({
               docId: doc.docId || doc.id,
-              instrumentNumber: doc.instrumentNumber || doc.docNumber || '',
-              docNumber: doc.docNumber || doc.instrumentNumber || '',
-              docType: (doc.docType || '').replace(/<[^>]+>/g, '').trim(),
-              docTypeCode: doc.docTypeCode || '',
-              recordedDate: doc.recordedDate || '',
-              instrumentDate: doc.instrumentDate || '',
+              instrumentNumber: doc.instrumentNumber || doc.docNumber || "",
+              docNumber: doc.docNumber || doc.instrumentNumber || "",
+              docType: (doc.docType || "").replace(/<[^>]+>/g, "").trim(),
+              docTypeCode: doc.docTypeCode || "",
+              recordedDate: doc.recordedDate || "",
+              instrumentDate: doc.instrumentDate || "",
               grantor: Array.isArray(doc.grantor) ? doc.grantor.filter(Boolean) : [],
               grantee: Array.isArray(doc.grantee) ? doc.grantee.filter(Boolean) : [],
               legalDescription: Array.isArray(doc.legalDescription)
@@ -248,8 +250,8 @@ function fetchPageViaWS(
               legals: Array.isArray(doc.legals) ? doc.legals : [],
               lot: Array.isArray(doc.lot) ? doc.lot.filter(Boolean) : [],
               block: Array.isArray(doc.block) ? doc.block.filter(Boolean) : [],
-              ocrText: doc.ocrText || '',
-              downloadLink: doc.downloadLink || '',
+              ocrText: doc.ocrText || "",
+              downloadLink: doc.downloadLink || "",
             }));
           resolve(docs);
         }
@@ -258,12 +260,12 @@ function fetchPageViaWS(
       }
     });
 
-    ws.on('error', () => {
+    ws.on("error", () => {
       clearTimeout(timeout);
       resolve([]);
     });
 
-    ws.on('close', () => {
+    ws.on("close", () => {
       clearTimeout(timeout);
       resolve([]);
     });
@@ -294,11 +296,11 @@ export function extractAddressFromDoc(doc: PublicSearchDoc): string | null {
  */
 export function extractSubdivisionFromDoc(doc: PublicSearchDoc): string | null {
   for (const legal of doc.legals) {
-    if (legal.legalType === 'Subdivision' && legal.developmentName) {
+    if (legal.legalType === "Subdivision" && legal.developmentName) {
       const parts = [`Subdivision: ${legal.developmentName}`];
       if (legal.lot) parts.push(`Lot: ${legal.lot}`);
       if (legal.block) parts.push(`Block: ${legal.block}`);
-      return parts.join(', ');
+      return parts.join(", ");
     }
   }
   return null;

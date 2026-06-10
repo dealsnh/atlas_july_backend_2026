@@ -28,16 +28,12 @@ const LEAD_FIELDS = [
   "raw_data",
 ] as const;
 
-export async function insertLeadIfNotExists(
-  lead: Record<string, string | null>,
-): Promise<boolean> {
+export async function insertLeadIfNotExists(lead: Record<string, string | null>): Promise<boolean> {
   const addr = (lead.address || "").trim();
   const name = (lead.owner_name || "").trim();
   if ((!addr || addr.length < 5) && (!name || name.length < 2)) return false;
 
-  const existing = await queryOne<{ id: string }>("SELECT id FROM leads WHERE id = $1", [
-    lead.id,
-  ]);
+  const existing = await queryOne<{ id: string }>("SELECT id FROM leads WHERE id = $1", [lead.id]);
   if (existing) return false;
 
   const normalized: Record<string, string | null> = { ...lead };
@@ -157,10 +153,11 @@ export async function findLeads(filters: LeadFilters): Promise<Lead[]> {
 }
 
 export async function updateLeadStatus(id: string, status: string, notes?: string): Promise<void> {
-  await execute(
-    "UPDATE leads SET status = $1, notes = $2, updated_at = NOW() WHERE id = $3",
-    [status, notes ?? null, id],
-  );
+  await execute("UPDATE leads SET status = $1, notes = $2, updated_at = NOW() WHERE id = $3", [
+    status,
+    notes ?? null,
+    id,
+  ]);
 }
 
 export async function updateLeadSkipTrace(

@@ -1,11 +1,7 @@
 // @ts-nocheck
 import { leadMatchesRequestedType } from "../config/county-lead-types.js";
 import { Lead, makeId, formatDate } from "./base.js";
-import {
-  extractAddressFromDoc,
-  scrapePublicSearch,
-  type PublicSearchDoc,
-} from "./publicsearch.js";
+import { extractAddressFromDoc, scrapePublicSearch, type PublicSearchDoc } from "./publicsearch.js";
 import { lookupByAddress } from "./assessor.js";
 
 const DOC_SEARCHES: Array<{ leadType: string; searchValue: string }> = [
@@ -79,7 +75,12 @@ export async function scrapePublicSearchLeads(
       if (!lead.owner_name && lead.address) {
         const enriched = await lookupByAddress(lead.address, county, state);
         if (enriched?.ownerName) {
-          lead = { ...lead, owner_name: enriched.ownerName, city: enriched.city, zip: enriched.zip };
+          lead = {
+            ...lead,
+            owner_name: enriched.ownerName,
+            city: enriched.city,
+            zip: enriched.zip,
+          };
         }
       }
 

@@ -116,7 +116,7 @@ async function main(): Promise<void> {
   );
 
   r = await apiFetch<{ in_progress?: boolean; log?: string[] }>("/scrape/status");
-  let scraping = r.data?.in_progress;
+  const scraping = r.data?.in_progress;
   record("Scrape status on mount", r.status === 200, scraping ? "in progress" : "idle");
 
   // ─── Trigger scrape if idle and DB empty ───
@@ -147,9 +147,17 @@ async function main(): Promise<void> {
     `total=${statsAfter}${statsAfter > statsBefore ? ` (+${statsAfter - statsBefore})` : ""}`,
   );
 
-  r = await apiFetch<{ leads?: Array<{ id: string; county: string; lead_type: string; owner_name: string | null; address: string | null; status: string }>; total?: number }>(
-    "/leads?limit=10",
-  );
+  r = await apiFetch<{
+    leads?: Array<{
+      id: string;
+      county: string;
+      lead_type: string;
+      owner_name: string | null;
+      address: string | null;
+      status: string;
+    }>;
+    total?: number;
+  }>("/leads?limit=10");
   const leadList = r.data?.leads ?? [];
   const hasTableRows = leadList.length > 0;
   const sample = leadList[0];
@@ -203,7 +211,11 @@ async function main(): Promise<void> {
     );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    record("SSE /scrape/stream reachable", msg.includes("timeout") || msg.includes("aborted"), "probe OK");
+    record(
+      "SSE /scrape/stream reachable",
+      msg.includes("timeout") || msg.includes("aborted"),
+      "probe OK",
+    );
   }
 
   const failed = results.filter((x) => !x.ok);

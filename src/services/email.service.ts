@@ -84,7 +84,13 @@ export async function sendDailyReport(
     html: bodyHtml,
     attachments: isTest
       ? []
-      : [{ filename: `atlas-leads-${date}.csv`, content: leadsToEmailCsv(leads), contentType: "text/csv" }],
+      : [
+          {
+            filename: `atlas-leads-${date}.csv`,
+            content: leadsToEmailCsv(leads),
+            contentType: "text/csv",
+          },
+        ],
   });
 
   logger.info({ toEmail, isTest, leadCount: leads.length }, "Email sent");

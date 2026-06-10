@@ -1,7 +1,11 @@
 import cron from "node-cron";
 import { resolveCountyLeadTypes } from "../config/county-lead-types.js";
 import { clientConfig } from "../config/constants.js";
-import { findLeadById, findLeads, insertLeadIfNotExists } from "../repositories/leads.repository.js";
+import {
+  findLeadById,
+  findLeads,
+  insertLeadIfNotExists,
+} from "../repositories/leads.repository.js";
 import {
   finishScrapeRun,
   getLastScrapeTime,
@@ -174,15 +178,11 @@ export function startDailyCron(): void {
         if (recipients.length > 0 && newLeads > 0 && isSmtpReady(settings)) {
           const allLeads = await findLeads({ from_date: toDate, to_date: toDate });
           for (const recipient of recipients) {
-            await sendDailyReport(
-              recipient,
-              clientConfig.name,
-              allLeads,
-              toDate,
-              settings,
-            ).catch((error) => {
-              logger.error({ err: error, recipient }, "Daily email failed");
-            });
+            await sendDailyReport(recipient, clientConfig.name, allLeads, toDate, settings).catch(
+              (error) => {
+                logger.error({ err: error, recipient }, "Daily email failed");
+              },
+            );
           }
           logger.info({ count: recipients.length }, "Daily report sent");
         } else if (!isSmtpReady(settings)) {
@@ -196,7 +196,7 @@ export function startDailyCron(): void {
   );
 
   logger.info("Daily scrape scheduled for 9:00 AM PT");
-} 
+}
 
 export { getDateRange };
 
@@ -221,9 +221,7 @@ export async function validateCountyScrape(params: {
   const { fromDate, toDate } = getDateRange(daysBack);
 
   const configured = clientConfig.counties.find(
-    (c) =>
-      c.state === params.state &&
-      (c.name === params.county || c.county === params.county),
+    (c) => c.state === params.state && (c.name === params.county || c.county === params.county),
   );
 
   const countyConfig: CountyConfig = {

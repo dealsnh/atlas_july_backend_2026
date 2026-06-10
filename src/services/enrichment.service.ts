@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {
   countLeadsNeedingEnrichment,
   findLeadsNeedingEnrichment,
@@ -14,7 +13,9 @@ const CONCURRENCY = 5;
 function addressVariants(addr: string): string[] {
   const base = addr.trim();
   const out = new Set<string>([base]);
-  const noCity = base.replace(/\s+(Kansas City|KC|Cincinnati|Birmingham|Huntsville)\b.*$/i, "").trim();
+  const noCity = base
+    .replace(/\s+(Kansas City|KC|Cincinnati|Birmingham|Huntsville)\b.*$/i, "")
+    .trim();
   if (noCity.length >= 5) out.add(noCity);
   const noZip = base.replace(/\s+\d{5}(-\d{4})?\s*$/i, "").trim();
   if (noZip.length >= 5) out.add(noZip);
@@ -73,9 +74,7 @@ async function enrichOne(lead: Lead): Promise<Lead> {
       if (match) current = applyAssessorMatch(current, match, state);
     }
 
-    const stillMissingOwner = !current.owner_name?.trim() || current.owner_name.trim().length < 2;
-    const stillMissingAddress =
-      !current.address?.trim() || current.address.startsWith("[");
+    const stillMissingAddress = !current.address?.trim() || current.address.startsWith("[");
 
     if (current.owner_name?.trim() && stillMissingAddress) {
       const properties = await lookupOwnerProperties(current.owner_name, county, state);

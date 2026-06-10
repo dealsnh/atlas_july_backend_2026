@@ -110,7 +110,7 @@ async function main(): Promise<void> {
 
   // ─── Public reads ───
   r = await fetchJson("/api/v1/stats");
-  let statsBefore = (r.body.data as { total?: number } | undefined)?.total ?? 0;
+  const statsBefore = (r.body.data as { total?: number } | undefined)?.total ?? 0;
   record("GET /stats", r.status === 200, `total=${statsBefore}`);
 
   r = await fetchJson("/api/v1/leads?limit=5");
@@ -141,7 +141,11 @@ async function main(): Promise<void> {
       token,
       apiKey: true,
     });
-    record("POST /scrape/historical (30 days)", r.status === 200, String((r.body.data as { message?: string })?.message));
+    record(
+      "POST /scrape/historical (30 days)",
+      r.status === 200,
+      String((r.body.data as { message?: string })?.message),
+    );
     console.log("\n  Waiting for historical scrape (up to 30 min)…\n");
     await waitForScrapeIdle(1_800_000);
   } else if (!scraping) {
@@ -159,7 +163,11 @@ async function main(): Promise<void> {
   record("GET /scrape/runs", r.status === 200, `${runs.length} runs`);
 
   r = await fetchJson("/api/v1/scrape", { method: "POST", body: "{}", token, apiKey: true });
-  record("POST /scrape while idle or 409 if busy", r.status === 200 || r.status === 409, `HTTP ${r.status}`);
+  record(
+    "POST /scrape while idle or 409 if busy",
+    r.status === 200 || r.status === 409,
+    `HTTP ${r.status}`,
+  );
 
   if (r.status === 200) await waitForScrapeIdle(1_800_000);
 
@@ -169,7 +177,9 @@ async function main(): Promise<void> {
   record("GET /stats after scrape", r.status === 200, `total=${statsAfter} (was ${statsBefore})`);
 
   r = await fetchJson("/api/v1/leads?limit=10");
-  const leads = (r.body.data as { leads?: Array<{ id: string; status: string }>; total?: number } | undefined);
+  const leads = r.body.data as
+    | { leads?: Array<{ id: string; status: string }>; total?: number }
+    | undefined;
   const leadList = leads?.leads ?? [];
   const totalLeads = leads?.total ?? 0;
   record("Leads saved in DB", r.status === 200, `${totalLeads} total, ${leadList.length} fetched`);
@@ -212,8 +222,16 @@ async function main(): Promise<void> {
     });
     record("PATCH /leads/:id not found → 404", r.status === 404);
 
-    r = await fetchJson(`/api/v1/leads/${leadId}/skip-trace`, { method: "POST", token, apiKey: true });
-    record("POST /leads/:id/skip-trace (no key → 400/503)", r.status === 400 || r.status === 503, `HTTP ${r.status}`);
+    r = await fetchJson(`/api/v1/leads/${leadId}/skip-trace`, {
+      method: "POST",
+      token,
+      apiKey: true,
+    });
+    record(
+      "POST /leads/:id/skip-trace (no key → 400/503)",
+      r.status === 400 || r.status === 503,
+      `HTTP ${r.status}`,
+    );
   } else {
     record("PATCH /leads/:id", true, "skipped — scraper returned 0 leads (sources/date range)");
     record("POST /leads/:id/skip-trace", true, "skipped — no leads");
@@ -239,10 +257,18 @@ async function main(): Promise<void> {
       signal: AbortSignal.timeout(120_000),
     });
     const vd = r.body.data as { total?: number; errors?: string[] } | undefined;
-    record("POST /admin/scrape/validate", r.status === 200, `${vd?.total ?? 0} sample, ${vd?.errors?.length ?? 0} errors`);
+    record(
+      "POST /admin/scrape/validate",
+      r.status === 200,
+      `${vd?.total ?? 0} sample, ${vd?.errors?.length ?? 0} errors`,
+    );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    record("POST /admin/scrape/validate", msg.includes("timeout") || msg.includes("aborted"), msg.slice(0, 60));
+    record(
+      "POST /admin/scrape/validate",
+      msg.includes("timeout") || msg.includes("aborted"),
+      msg.slice(0, 60),
+    );
   }
 
   // ─── Settings edge ───
@@ -257,7 +283,11 @@ async function main(): Promise<void> {
   // ─── OpenAPI ───
   r = await fetchJson("/api/docs/openapi.json");
   const info = r.body.info as { version?: string } | undefined;
-  record("GET /api/docs/openapi.json", r.status === 200 && info?.version === "1.2.0", `v${info?.version}`);
+  record(
+    "GET /api/docs/openapi.json",
+    r.status === 200 && info?.version === "1.2.0",
+    `v${info?.version}`,
+  );
 
   // ─── 404 ───
   r = await fetchJson("/api/v1/does-not-exist");

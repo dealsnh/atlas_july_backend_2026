@@ -362,10 +362,7 @@ async function importAlabamaJeffersonTaxDelinquent(
 ): Promise<number> {
   const rows = await readCsv(filePath);
   const records = rows.map((r) => ({
-    id: stableId(
-      `AL-JEF-DLT-${subCounty.toUpperCase().slice(0, 3)}`,
-      r.parcel_id || r.owner_name,
-    ),
+    id: stableId(`AL-JEF-DLT-${subCounty.toUpperCase().slice(0, 3)}`, r.parcel_id || r.owner_name),
     county: "Jefferson",
     state: "AL",
     lead_type: "Tax Delinquent",
@@ -393,10 +390,7 @@ async function importAlabamaJeffersonTaxDelinquent(
   return insertBatch(records);
 }
 
-async function importAlabamaCountyTaxDelinquent(
-  filePath: string,
-  county: string,
-): Promise<number> {
+async function importAlabamaCountyTaxDelinquent(filePath: string, county: string): Promise<number> {
   const rows = await readCsv(filePath);
   if (rows.length === 0) return 0;
   const records = rows.map((r) => {
@@ -408,7 +402,10 @@ async function importAlabamaCountyTaxDelinquent(
     const parcel = clean(r.parcel_id) || clean(r.parcel) || clean(r.PARCEL);
     const amount = clean(r.delinquent_amount) || clean(r.unpaid_amount) || clean(r.amount);
     return {
-      id: stableId(`AL-${county.toUpperCase().slice(0, 3)}-DLT`, parcel || `${ownerName ?? ""}${address ?? ""}`),
+      id: stableId(
+        `AL-${county.toUpperCase().slice(0, 3)}-DLT`,
+        parcel || `${ownerName ?? ""}${address ?? ""}`,
+      ),
       county,
       state: "AL",
       lead_type: "Tax Delinquent",
@@ -479,7 +476,8 @@ function resolvePath(baseDir: string, filename: string): string | null {
 async function main(): Promise<void> {
   await initDb();
 
-  const csvDir = process.argv[2] || process.env.SEED_CSV_DIR || path.join(__dirname, "..", "..", "seed-data");
+  const csvDir =
+    process.argv[2] || process.env.SEED_CSV_DIR || path.join(__dirname, "..", "..", "seed-data");
   console.log(`[seed] CSV directory: ${csvDir}`);
   console.log(`[seed] Only importing leads on or after ${CUTOFF_STR}`);
 
@@ -487,7 +485,9 @@ async function main(): Promise<void> {
     {
       name: "tina_leads_week",
       fn: () => {
-        const p = resolvePath(csvDir, "tina_leads_week.csv") || resolvePath(csvDir, "atlas_csvs/tina_leads_week.csv");
+        const p =
+          resolvePath(csvDir, "tina_leads_week.csv") ||
+          resolvePath(csvDir, "atlas_csvs/tina_leads_week.csv");
         return p ? importTinaLeads(p) : Promise.resolve(0);
       },
     },
@@ -625,7 +625,9 @@ async function main(): Promise<void> {
   }
 
   const totalRow = await queryOne<{ c: string }>("SELECT COUNT(*)::int AS c FROM leads");
-  console.log(`\n[seed] Done. Inserted ${totalInserted} new records. Total leads in DB: ${totalRow?.c ?? 0}`);
+  console.log(
+    `\n[seed] Done. Inserted ${totalInserted} new records. Total leads in DB: ${totalRow?.c ?? 0}`,
+  );
 
   const breakdown = await query<{ county: string; state: string; lead_type: string; n: string }>(
     "SELECT county, state, lead_type, COUNT(*)::int AS n FROM leads GROUP BY county, state, lead_type ORDER BY county, lead_type",

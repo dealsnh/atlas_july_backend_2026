@@ -37,7 +37,9 @@ function firstString(value: unknown): string | undefined {
 export function parseSkipTraceResponse(data: Record<string, unknown>): SkipTraceResult {
   const nested =
     (data.data && typeof data.data === "object" ? (data.data as Record<string, unknown>) : null) ||
-    (data.result && typeof data.result === "object" ? (data.result as Record<string, unknown>) : null) ||
+    (data.result && typeof data.result === "object"
+      ? (data.result as Record<string, unknown>)
+      : null) ||
     data;
 
   const phone =
@@ -47,9 +49,7 @@ export function parseSkipTraceResponse(data: Record<string, unknown>): SkipTrace
     firstString(nested.phone_number);
 
   const email =
-    firstString(nested.email) ||
-    firstString(nested.emails) ||
-    firstString(nested.email_address);
+    firstString(nested.email) || firstString(nested.emails) || firstString(nested.email_address);
 
   const mailing =
     firstString(nested.mailing) ||

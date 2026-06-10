@@ -2,9 +2,10 @@ import { queryOne, execute } from "../db/query.js";
 import type { UserRecord } from "../types/user.js";
 
 export async function findUserByEmail(email: string): Promise<UserRecord | null> {
-  return (await queryOne<UserRecord>("SELECT * FROM users WHERE LOWER(email) = LOWER($1)", [
-    email,
-  ])) ?? null;
+  return (
+    (await queryOne<UserRecord>("SELECT * FROM users WHERE LOWER(email) = LOWER($1)", [email])) ??
+    null
+  );
 }
 
 export async function findUserById(id: string): Promise<UserRecord | null> {

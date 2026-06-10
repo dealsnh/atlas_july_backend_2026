@@ -49,10 +49,7 @@ export async function signupUser(input: {
   return issueToken(user);
 }
 
-export async function loginUser(input: {
-  email: string;
-  password: string;
-}): Promise<AuthResult> {
+export async function loginUser(input: { email: string; password: string }): Promise<AuthResult> {
   const user = await findUserByEmail(input.email);
   if (!user) {
     throw ApiError.unauthorized("Invalid email or password");

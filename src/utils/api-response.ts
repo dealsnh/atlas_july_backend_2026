@@ -28,8 +28,7 @@ export function errorResponse(
 
 export function createRateLimitHandler(message: string) {
   return (_req: Request, res: Response, _next: NextFunction, options?: Options): Response => {
-    const status =
-      options && typeof options.statusCode === "number" ? options.statusCode : 429;
+    const status = options && typeof options.statusCode === "number" ? options.statusCode : 429;
     return errorResponse(res, status, message);
   };
 }

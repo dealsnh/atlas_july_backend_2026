@@ -10,17 +10,26 @@ import * as XLSX from "xlsx";
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 };
 
 const AL_CRAIGSLIST: Record<string, string> = {
-  Madison: "huntsville", Limestone: "huntsville", Morgan: "huntsville",
-  Montgomery: "montgomery", Autauga: "montgomery", Elmore: "montgomery",
-  Jefferson: "birmingham", Shelby: "birmingham",
+  Madison: "huntsville",
+  Limestone: "huntsville",
+  Morgan: "huntsville",
+  Montgomery: "montgomery",
+  Autauga: "montgomery",
+  Elmore: "montgomery",
+  Jefferson: "birmingham",
+  Shelby: "birmingham",
 };
 
 // ─── Pre-Foreclosure via AlaCourt public search ───────────────────────────────
-async function scrapePreForeclosure(county: string, fromDate: string, toDate: string): Promise<Lead[]> {
+async function scrapePreForeclosure(
+  county: string,
+  fromDate: string,
+  toDate: string,
+): Promise<Lead[]> {
   const leads: Lead[] = [];
   try {
     // AlaCourt public civil case search
@@ -53,22 +62,33 @@ async function scrapePreForeclosure(county: string, fromDate: string, toDate: st
 
       leads.push({
         id: makeId(caseNumber, county, "AL"),
-        county, state: "AL",
+        county,
+        state: "AL",
         lead_type: "Pre-Foreclosure",
         owner_name: ownerName,
-        address: null, city: null, zip: null,
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+        address: null,
+        city: null,
+        zip: null,
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
         case_number: caseNumber,
         filing_date: formatDate(filedDate),
-        assessed_value: null, tax_year: null,
-        lender: null, loan_amount: null,
-        sale_date: null, sale_amount: null,
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
+        sale_date: null,
+        sale_amount: null,
         description: caseStyle,
         source_url: `https://v2.alacourt.com/frmPublicCaseSearch.aspx`,
         raw_data: JSON.stringify({ caseStyle }),
       });
     }
-  } catch (_) { /* silent */ }
+  } catch (_) {
+    /* silent */
+  }
   return leads;
 }
 
@@ -76,14 +96,20 @@ async function scrapePreForeclosure(county: string, fromDate: string, toDate: st
 const MADISON_CERT_XLSX = "https://madisontc.com/s/MadisonCountyCertificates-tshc.xlsx";
 
 function trimCell(v: unknown): string {
-  return String(v ?? "").replace(/\s+/g, " ").trim();
+  return String(v ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function madisonRowAddress(row: Record<string, unknown>): string | null {
   const house = trimCell(row["Location House #"]);
   const street = trimCell(row["Location Address"]);
   const city = trimCell(row["Location City"]);
-  const core = [house, street].filter((p) => p && /\S/.test(p)).join(" ").trim() || street;
+  const core =
+    [house, street]
+      .filter((p) => p && /\S/.test(p))
+      .join(" ")
+      .trim() || street;
   if (!core) return null;
   return city ? `${core}, ${city}` : core;
 }
@@ -130,7 +156,8 @@ async function scrapeMadisonTaxDelinquent(fromDate: string, toDate: string): Pro
     const address = madisonRowAddress(row);
     const city = trimCell(row["Location City"]) || "Huntsville";
     const amount = row["Unpaid Bal"] != null ? String(row["Unpaid Bal"]) : null;
-    const taxYear = row["Tax Year"] != null ? String(row["Tax Year"]) : new Date().getFullYear().toString();
+    const taxYear =
+      row["Tax Year"] != null ? String(row["Tax Year"]) : new Date().getFullYear().toString();
     leads.push({
       id: makeId(parcel, "Madison", "AL", "tax"),
       county: "Madison",
@@ -203,7 +230,11 @@ async function scrapeMadisonSheriffSales(fromDate: string, toDate: string): Prom
 }
 
 // ─── Tax Delinquent via Alabama Revenue Commissioner sites ────────────────────
-async function scrapeTaxDelinquent(county: string, fromDate: string, toDate: string): Promise<Lead[]> {
+async function scrapeTaxDelinquent(
+  county: string,
+  fromDate: string,
+  toDate: string,
+): Promise<Lead[]> {
   if (county === "Madison") {
     const madison = await scrapeMadisonTaxDelinquent(fromDate, toDate);
     if (madison.length) return madison;
@@ -215,7 +246,9 @@ async function scrapeTaxDelinquent(county: string, fromDate: string, toDate: str
     Montgomery: "https://www.montgomerycountyal.gov/departments/revenue/delinquent-tax",
     Shelby: "https://www.shelbyal.com/departments/revenue/delinquent-tax-list",
   };
-  const url = urls[county] || `https://www.revenue.alabama.gov/property-tax/delinquent-property-tax-list/?county=${county}`;
+  const url =
+    urls[county] ||
+    `https://www.revenue.alabama.gov/property-tax/delinquent-property-tax-list/?county=${county}`;
 
   try {
     let res = await fetchWithRetry(url);
@@ -250,23 +283,37 @@ async function scrapeTaxDelinquent(county: string, fromDate: string, toDate: str
       // Skip rows that look like navigation/header/contact content (not real property records)
       // Real delinquent tax rows have: owner name (all caps or mixed), parcel/amount, address
       const firstCell = cells[0];
-      if (/courthouse|hours of operation|monday|friday|phone|fax|\d{3}\s*[-.]\s*\d{3}|north side square|access denied|permission/i.test(firstCell)) continue;
+      if (
+        /courthouse|hours of operation|monday|friday|phone|fax|\d{3}\s*[-.]\s*\d{3}|north side square|access denied|permission/i.test(
+          firstCell,
+        )
+      )
+        continue;
       if (firstCell.length < 3 || firstCell.length > 120) continue;
       // Must look like a real owner name: letters, not just whitespace/symbols
       if (!/[A-Za-z]{2,}/.test(firstCell)) continue;
 
       leads.push({
         id: makeId(cells[0], county, "AL", "tax"),
-        county, state: "AL",
+        county,
+        state: "AL",
         lead_type: "Tax Delinquent",
         owner_name: cells[0],
-        address: cells[1] || null, city: null, zip: null,
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+        address: cells[1] || null,
+        city: null,
+        zip: null,
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
         case_number: cells[3] || null,
         filing_date: formatDate(cells[4]) || new Date().toISOString().split("T")[0],
-        assessed_value: cells[2] || null, tax_year: new Date().getFullYear().toString(),
-        lender: null, loan_amount: null,
-        sale_date: null, sale_amount: null,
+        assessed_value: cells[2] || null,
+        tax_year: new Date().getFullYear().toString(),
+        lender: null,
+        loan_amount: null,
+        sale_date: null,
+        sale_amount: null,
         description: `Tax delinquent — amount: ${cells[2] || "unknown"}`,
         source_url: url,
         raw_data: JSON.stringify(cells),
@@ -288,14 +335,20 @@ async function scrapeTaxDelinquent(county: string, fromDate: string, toDate: str
         if (prop?.zip) batch[j].zip = prop.zip;
       }
     }
-  } catch (_) { /* silent */ }
+  } catch (_) {
+    /* silent */
+  }
   return leads;
 }
 
 // ─── Sheriff Sales via Rubin Lublin (statewide AL foreclosure listings) ─────────────
 // CONFIRMED WORKING: rubinlublin.com/foreclosure-listings/ — covers all AL counties
 // Returns property address + case info. Owner enrichment via JCCAL (Jefferson) or ATTOM.
-async function scrapeSheriffSales(county: string, fromDate: string, toDate: string): Promise<Lead[]> {
+async function scrapeSheriffSales(
+  county: string,
+  fromDate: string,
+  toDate: string,
+): Promise<Lead[]> {
   const leads: Lead[] = [];
   if (county === "Madison") {
     const madison = await scrapeMadisonSheriffSales(fromDate, toDate);
@@ -303,7 +356,7 @@ async function scrapeSheriffSales(county: string, fromDate: string, toDate: stri
   }
   try {
     // Rubin Lublin — primary AL foreclosure/sheriff sale attorney, covers all counties
-    const url = 'https://rubinlublin.com/foreclosure-listings/';
+    const url = "https://rubinlublin.com/foreclosure-listings/";
     let res = await fetchWithRetry(url, { headers: HEADERS });
     let html = res.ok ? await res.text() : "";
     if (!html.includes("<tr") || !html.toLowerCase().includes(county.toLowerCase())) {
@@ -315,27 +368,41 @@ async function scrapeSheriffSales(county: string, fromDate: string, toDate: stri
     const rows = html.match(rowRe) || [];
     for (const row of rows) {
       const cells = row.match(/<td[^>]*>([\s\S]*?)<\/td>/gi) || [];
-      const text = cells.map(c => c.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+      const text = cells.map((c) =>
+        c
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim(),
+      );
       if (text.length < 2 || !text[0]) continue;
-      const rowText = text.join(' ').toLowerCase();
+      const rowText = text.join(" ").toLowerCase();
       const countyLower = county.toLowerCase();
-      if (!rowText.includes(countyLower) && !rowText.includes(county.substring(0, 4).toLowerCase())) continue;
+      if (!rowText.includes(countyLower) && !rowText.includes(county.substring(0, 4).toLowerCase()))
+        continue;
       const caseNum = text[0];
-      const address = text.find(t => /\d+\s+[A-Za-z]/.test(t)) || text[1] || '';
-      const saleDate = text.find(t => /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(t)) || '';
-      const amount = text.find(t => /\$[\d,]+/.test(t)) || '';
+      const address = text.find((t) => /\d+\s+[A-Za-z]/.test(t)) || text[1] || "";
+      const saleDate = text.find((t) => /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(t)) || "";
+      const amount = text.find((t) => /\$[\d,]+/.test(t)) || "";
       if (!caseNum || /case|#|number/i.test(caseNum)) continue;
       leads.push({
         id: makeId(caseNum, county, "AL", "sheriff"),
-        county, state: "AL",
+        county,
+        state: "AL",
         lead_type: "Sheriff Sale",
         owner_name: null,
-        address: address || null, city: null, zip: null,
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+        address: address || null,
+        city: null,
+        zip: null,
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
         case_number: caseNum,
         filing_date: formatDate(fromDate),
-        assessed_value: null, tax_year: null,
-        lender: null, loan_amount: null,
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
         sale_date: formatDate(saleDate),
         sale_amount: amount || null,
         description: `Sheriff Sale — ${county} County AL — ${address}`,
@@ -345,8 +412,8 @@ async function scrapeSheriffSales(county: string, fromDate: string, toDate: stri
     }
     // County-specific fallback for Jefferson and Madison
     const countyUrls: Record<string, string> = {
-      Jefferson: 'https://www.jeffcosheriff.net/civil-process',
-      Madison: 'https://www.madisoncountyal.gov/departments/sheriff/civil-process',
+      Jefferson: "https://www.jeffcosheriff.net/civil-process",
+      Madison: "https://www.madisoncountyal.gov/departments/sheriff/civil-process",
     };
     const countyUrl = countyUrls[county];
     if (countyUrl && leads.length === 0) {
@@ -360,31 +427,51 @@ async function scrapeSheriffSales(county: string, fromDate: string, toDate: stri
           const cRows = cHtml.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || [];
           for (const row of cRows) {
             const cells = row.match(/<td[^>]*>([\s\S]*?)<\/td>/gi) || [];
-            const text = cells.map(c => c.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+            const text = cells.map((c) =>
+              c
+                .replace(/<[^>]+>/g, " ")
+                .replace(/\s+/g, " ")
+                .trim(),
+            );
             if (text.length < 2 || !text[0]) continue;
             const caseNum = text[0];
             if (/case|#|number/i.test(caseNum)) continue;
-            const address = text[1] || '';
-            const saleDate = text[2] || '';
+            const address = text[1] || "";
+            const saleDate = text[2] || "";
             leads.push({
               id: makeId(caseNum, county, "AL", "sheriff"),
-              county, state: "AL",
+              county,
+              state: "AL",
               lead_type: "Sheriff Sale",
               owner_name: null,
-              address: address || null, city: null, zip: null,
-              mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
-              case_number: caseNum, filing_date: formatDate(fromDate),
-              assessed_value: null, tax_year: null, lender: null, loan_amount: null,
-              sale_date: formatDate(saleDate), sale_amount: null,
+              address: address || null,
+              city: null,
+              zip: null,
+              mailing_address: null,
+              mailing_city: null,
+              mailing_state: null,
+              mailing_zip: null,
+              case_number: caseNum,
+              filing_date: formatDate(fromDate),
+              assessed_value: null,
+              tax_year: null,
+              lender: null,
+              loan_amount: null,
+              sale_date: formatDate(saleDate),
+              sale_amount: null,
               description: `Sheriff Sale — ${county} County AL`,
               source_url: countyUrl,
               raw_data: JSON.stringify(text),
             });
           }
         }
-      } catch { /* silent */ }
+      } catch {
+        /* silent */
+      }
     }
-  } catch (e) { console.error(`[AL ${county}] Sheriff Sales error:`, e); }
+  } catch (e) {
+    console.error(`[AL ${county}] Sheriff Sales error:`, e);
+  }
 
   const CONCURRENCY = 10;
   const needsOwner = leads.filter((l) => !l.owner_name?.trim() && l.address);
@@ -411,31 +498,43 @@ async function scrapeFSBO(county: string, fromDate: string, toDate: string): Pro
   try {
     const url = `https://${city}.craigslist.org/search/reo?format=json`;
     const res = await fetchWithRetry(url);
-    const data = await res.json() as any;
+    const data = (await res.json()) as any;
     const items = data?.data?.items || [];
 
     for (const item of items.slice(0, 60)) {
       const title: string = item.title || "";
-      if (!/fsbo|for sale by owner|motivated|must sell|price.?reduc|cash.?only|as.?is/i.test(title)) continue;
+      if (!/fsbo|for sale by owner|motivated|must sell|price.?reduc|cash.?only|as.?is/i.test(title))
+        continue;
 
       leads.push({
         id: makeId(item.id || title, county, "AL", "fsbo"),
-        county, state: "AL",
+        county,
+        state: "AL",
         lead_type: "FSBO",
         owner_name: "Unknown (Craigslist)",
-        address: title, city: null, zip: null,
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+        address: title,
+        city: null,
+        zip: null,
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
         case_number: null,
         filing_date: formatDate(item.posted_date) || new Date().toISOString().split("T")[0],
-        assessed_value: null, tax_year: null,
-        lender: null, loan_amount: null,
-        sale_date: null, sale_amount: item.ask?.toString() || null,
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
+        sale_date: null,
+        sale_amount: item.ask?.toString() || null,
         description: title,
         source_url: item.url || url,
         raw_data: JSON.stringify({ title, price: item.ask }),
       });
     }
-  } catch (_) { /* silent */ }
+  } catch (_) {
+    /* silent */
+  }
   return leads;
 }
 
@@ -463,16 +562,25 @@ async function scrapeObituaries(county: string, fromDate: string, toDate: string
       if (!names[i]) continue;
       leads.push({
         id: makeId(names[i], county, "AL", "obit"),
-        county, state: "AL",
+        county,
+        state: "AL",
         lead_type: "Obituary",
         owner_name: names[i],
-        address: null, city: null, zip: null,
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+        address: null,
+        city: null,
+        zip: null,
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
         case_number: null,
         filing_date: formatDate(dates[i]) || new Date().toISOString().split("T")[0],
-        assessed_value: null, tax_year: null,
-        lender: null, loan_amount: null,
-        sale_date: null, sale_amount: null,
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
+        sale_date: null,
+        sale_amount: null,
         description: "Obituary — potential estate/probate lead",
         source_url: url,
         raw_data: JSON.stringify({ name: names[i], date: dates[i] }),
@@ -483,7 +591,9 @@ async function scrapeObituaries(county: string, fromDate: string, toDate: string
     const CONCURRENCY_O = 5;
     for (let i = 0; i < leads.length; i += CONCURRENCY_O) {
       const batch = leads.slice(i, i + CONCURRENCY_O);
-      const results = await Promise.all(batch.map(l => lookupOwnerProperties(l.owner_name || "", county, "AL")));
+      const results = await Promise.all(
+        batch.map((l) => lookupOwnerProperties(l.owner_name || "", county, "AL")),
+      );
       for (let j = 0; j < batch.length; j++) {
         const properties = results[j];
         if (properties.length === 0) continue;
@@ -492,22 +602,33 @@ async function scrapeObituaries(county: string, fromDate: string, toDate: string
           enriched.push({
             ...lead,
             id: makeId(county, "AL", "Obituary", `${lead.owner_name || ""}-${prop.address}`),
-            address: prop.address, city: prop.city || null, zip: prop.zip || null,
+            address: prop.address,
+            city: prop.city || null,
+            zip: prop.zip || null,
             owner_name: prop.ownerName || lead.owner_name,
-            raw_data: JSON.stringify({ ...JSON.parse(lead.raw_data || "{}"), parcelId: prop.parcelId }),
+            raw_data: JSON.stringify({
+              ...JSON.parse(lead.raw_data || "{}"),
+              parcelId: prop.parcelId,
+            }),
           });
         }
       }
     }
     return enriched;
-  } catch (_) { /* silent */ }
+  } catch (_) {
+    /* silent */
+  }
   return [];
 }
 
 // ─── BANKRUPTCY — Northern District of AL (ecf.alnb.uscourts.gov) ─────────────
 
 // ─── PROBATE — Alabama SJIS probate court filings ────────────────────────────
-export async function scrapeProbate(county: string, fromDate: string, toDate: string): Promise<Lead[]> {
+export async function scrapeProbate(
+  county: string,
+  fromDate: string,
+  toDate: string,
+): Promise<Lead[]> {
   const leads: Lead[] = [];
   try {
     const url = `https://v2.alacourt.com/frmPublicCaseSearch.aspx?county=${encodeURIComponent(county)}&caseType=PR&fromDate=${fromDate}&toDate=${toDate}`;
@@ -533,7 +654,7 @@ export async function scrapeProbate(county: string, fromDate: string, toDate: st
     for (let i = 0; i < cases.length; i += CONCURRENCY) {
       const batch = cases.slice(i, i + CONCURRENCY);
       const results = await Promise.all(
-        batch.map(c => lookupOwnerProperties(c.name, county, "AL"))
+        batch.map((c) => lookupOwnerProperties(c.name, county, "AL")),
       );
       for (let j = 0; j < batch.length; j++) {
         const { caseNum, name, filed } = batch[j];
@@ -542,19 +663,35 @@ export async function scrapeProbate(county: string, fromDate: string, toDate: st
         for (const prop of properties) {
           leads.push({
             id: makeId("PROB", `${caseNum || name}-${prop.address}`, county, "AL"),
-            county, state: "AL", lead_type: "Probate",
-            owner_name: name || null, address: prop.address, city: prop.city || county, zip: prop.zip || null,
-            mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
-            case_number: caseNum || null, filing_date: formatDate(filed),
-            assessed_value: null, tax_year: null, lender: null, loan_amount: null,
-            sale_date: null, sale_amount: null,
+            county,
+            state: "AL",
+            lead_type: "Probate",
+            owner_name: name || null,
+            address: prop.address,
+            city: prop.city || county,
+            zip: prop.zip || null,
+            mailing_address: null,
+            mailing_city: null,
+            mailing_state: null,
+            mailing_zip: null,
+            case_number: caseNum || null,
+            filing_date: formatDate(filed),
+            assessed_value: null,
+            tax_year: null,
+            lender: null,
+            loan_amount: null,
+            sale_date: null,
+            sale_amount: null,
             description: `${county} County AL Probate — ${name || caseNum}`,
-            source_url: url, raw_data: JSON.stringify({ caseNum, name, filed, parcelId: prop.parcelId }),
+            source_url: url,
+            raw_data: JSON.stringify({ caseNum, name, filed, parcelId: prop.parcelId }),
           });
         }
       }
     }
-  } catch (e) { console.error(`[AL] Probate ${county} error:`, e); }
+  } catch (e) {
+    console.error(`[AL] Probate ${county} error:`, e);
+  }
   return leads;
 }
 
@@ -562,8 +699,14 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
   const leads: Lead[] = [];
   // AL Northern District covers Madison, Morgan, Jefferson, Shelby; Southern covers Montgomery, Autauga, Elmore
   const RSS_FEEDS = [
-    { url: "https://ecf.alnb.uscourts.gov/cgi-bin/rss_outside.pl", counties: ["Madison", "Morgan", "Jefferson", "Shelby"] },
-    { url: "https://ecf.alsb.uscourts.gov/cgi-bin/rss_outside.pl", counties: ["Montgomery", "Autauga", "Elmore"] },
+    {
+      url: "https://ecf.alnb.uscourts.gov/cgi-bin/rss_outside.pl",
+      counties: ["Madison", "Morgan", "Jefferson", "Shelby"],
+    },
+    {
+      url: "https://ecf.alsb.uscourts.gov/cgi-bin/rss_outside.pl",
+      counties: ["Montgomery", "Autauga", "Elmore"],
+    },
   ];
   try {
     for (const feed of RSS_FEEDS) {
@@ -572,14 +715,24 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
       const xml = await rss.text();
       const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
       // Parse all items first
-      type ALBkItem = { title: string; link: string; pubDate: string; caseNum: string; caseName: string };
+      type ALBkItem = {
+        title: string;
+        link: string;
+        pubDate: string;
+        caseNum: string;
+        caseName: string;
+      };
       const bkItems: ALBkItem[] = [];
       for (const item of items) {
-        const title = (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) || item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
-        const link  = (item.match(/<link>(.+?)<\/link>/))?.[1]?.trim() || "";
-        const desc  = (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) || item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
-        const pubDate = (item.match(/<pubDate>(.+?)<\/pubDate>/))?.[1]?.trim() || "";
-        const caseNum = (title.match(/([0-9]{2}-[0-9]{5})/)?.[1]) || title;
+        const title =
+          (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) ||
+            item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
+        const link = item.match(/<link>(.+?)<\/link>/)?.[1]?.trim() || "";
+        const desc =
+          (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) ||
+            item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
+        const pubDate = item.match(/<pubDate>(.+?)<\/pubDate>/)?.[1]?.trim() || "";
+        const caseNum = title.match(/([0-9]{2}-[0-9]{5})/)?.[1] || title;
         if (pubDate) {
           const d = new Date(pubDate);
           if (!isNaN(d.getTime())) {
@@ -590,7 +743,12 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
           }
         }
         const ownerFromTitle = title.replace(/^[0-9]{2}-[0-9]{5}(-[0-9]+)?\s*/, "").trim();
-        const caseName = ownerFromTitle || desc.replace(/<[^>]+>/g, "").replace(/&[a-z0-9#]+;/g, "").trim();
+        const caseName =
+          ownerFromTitle ||
+          desc
+            .replace(/<[^>]+>/g, "")
+            .replace(/&[a-z0-9#]+;/g, "")
+            .trim();
         bkItems.push({ title, link, pubDate, caseNum, caseName });
       }
       const MAX_BK_ITEMS = 10;
@@ -601,13 +759,13 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
         const batch = itemsToProcess.slice(i, i + CONCURRENCY);
         // For each item, try all counties in parallel and pick first match
         const batchResults = await Promise.all(
-          batch.map(async b => {
+          batch.map(async (b) => {
             for (const county of feed.counties) {
               const props = await lookupOwnerProperties(b.caseName, county, "AL");
               if (props.length > 0) return { county, props };
             }
             return null;
-          })
+          }),
         );
         for (let j = 0; j < batch.length; j++) {
           const match = batchResults[j];
@@ -624,14 +782,29 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
               address: prop.address,
               city: prop.city || county,
               zip: prop.zip || null,
-              mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+              mailing_address: null,
+              mailing_city: null,
+              mailing_state: null,
+              mailing_zip: null,
               case_number: caseNum,
-              filing_date: pubDate ? formatDate(new Date(pubDate).toISOString().slice(0,10)) : formatDate(fromDate),
-              assessed_value: null, tax_year: null,
-              lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+              filing_date: pubDate
+                ? formatDate(new Date(pubDate).toISOString().slice(0, 10))
+                : formatDate(fromDate),
+              assessed_value: null,
+              tax_year: null,
+              lender: null,
+              loan_amount: null,
+              sale_date: null,
+              sale_amount: null,
               source_url: link || feed.url,
               description: `AL Bankruptcy — ${caseName || caseNum}`,
-              raw_data: JSON.stringify({ title, caseNum, caseName, pubDate, parcelId: prop.parcelId }),
+              raw_data: JSON.stringify({
+                title,
+                caseNum,
+                caseName,
+                pubDate,
+                parcelId: prop.parcelId,
+              }),
             });
           }
         }
@@ -669,15 +842,25 @@ export async function scrapeCodeViolations(fromDate: string, toDate: string): Pr
         if (cells.length < 2 || !cells[0]) continue;
         leads.push({
           id: makeId("CV", cells[0], "Jefferson", "AL"),
-          county: "Jefferson", state: "AL",
+          county: "Jefferson",
+          state: "AL",
           lead_type: "Code Violation",
           owner_name: cells[1] || null,
-          address: cells[2] || null, city: "Birmingham", zip: null,
-          mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+          address: cells[2] || null,
+          city: "Birmingham",
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
           case_number: cells[0] || null,
           filing_date: formatDate(cells[3]) || new Date().toISOString().split("T")[0],
-          assessed_value: null, tax_year: null,
-          lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
           description: `Code Violation — Jefferson County AL — ${cells[2] || cells[0]}`,
           source_url: url,
           raw_data: JSON.stringify(cells),
@@ -704,21 +887,31 @@ export async function scrapeVacantAbandoned(fromDate: string, toDate: string): P
     const url = `https://data.birminghamal.gov/resource/vacant-structures.json?$where=date_reported>='${fromDate}T00:00:00'&$limit=200&$order=date_reported DESC`;
     const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
     if (res.ok) {
-      const data = await res.json() as Record<string, string>[];
+      const data = (await res.json()) as Record<string, string>[];
       for (const item of data) {
         const address = item.address || item.street_address || "";
         if (!address) continue;
         leads.push({
           id: makeId("Jefferson", "AL", "Vacant Abandoned", item.id || address),
-          county: "Jefferson", state: "AL",
+          county: "Jefferson",
+          state: "AL",
           lead_type: "Vacant/Abandoned",
           owner_name: null,
-          address: address || null, city: "Birmingham", zip: item.zip_code || null,
-          mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+          address: address || null,
+          city: "Birmingham",
+          zip: item.zip_code || null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
           case_number: item.id || null,
           filing_date: formatDate(item.date_reported?.slice(0, 10) || fromDate),
-          assessed_value: null, tax_year: null,
-          lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
           description: `Vacant/Abandoned — ${item.status || "Vacant Structure"} — ${address}`,
           source_url: "https://data.birminghamal.gov/resource/vacant-structures",
           raw_data: JSON.stringify(item),
@@ -727,15 +920,21 @@ export async function scrapeVacantAbandoned(fromDate: string, toDate: string): P
     }
     // Enrich with owner name via assessor address lookup — 10 concurrent
     const CONCURRENCY_V = 10;
-    const unenriched = leads.filter(l => !l.owner_name && l.address);
+    const unenriched = leads.filter((l) => !l.owner_name && l.address);
     for (let i = 0; i < unenriched.length; i += CONCURRENCY_V) {
       const batch = unenriched.slice(i, i + CONCURRENCY_V);
-      const results = await Promise.all(batch.map(l => lookupByAddress(l.address!, l.county, "AL")));
+      const results = await Promise.all(
+        batch.map((l) => lookupByAddress(l.address!, l.county, "AL")),
+      );
       for (let j = 0; j < batch.length; j++) {
         const prop = results[j];
         if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
         if (prop?.zip && !batch[j].zip) batch[j].zip = prop.zip;
-        if (prop?.parcelId) batch[j].raw_data = JSON.stringify({ ...JSON.parse(batch[j].raw_data || "{}"), parcelId: prop.parcelId });
+        if (prop?.parcelId)
+          batch[j].raw_data = JSON.stringify({
+            ...JSON.parse(batch[j].raw_data || "{}"),
+            parcelId: prop.parcelId,
+          });
       }
     }
   } catch (e) {
@@ -771,7 +970,9 @@ export async function scrapeDivorce(fromDate: string, toDate: string): Promise<L
       const CONCURRENCY = 5;
       for (let i = 0; i < cases.length; i += CONCURRENCY) {
         const batch = cases.slice(i, i + CONCURRENCY);
-        const results = await Promise.all(batch.map(c => lookupOwnerProperties(c.caseName, county, "AL")));
+        const results = await Promise.all(
+          batch.map((c) => lookupOwnerProperties(c.caseName, county, "AL")),
+        );
         for (let j = 0; j < batch.length; j++) {
           const { caseNum, caseName, filedDate } = batch[j];
           const properties = results[j];
@@ -779,15 +980,25 @@ export async function scrapeDivorce(fromDate: string, toDate: string): Promise<L
           for (const prop of properties) {
             leads.push({
               id: makeId(county, "AL", "Divorce", `${caseNum}-${prop.address}`),
-              county, state: "AL",
+              county,
+              state: "AL",
               lead_type: "Divorce",
               owner_name: prop.ownerName || caseName || null,
-              address: prop.address, city: prop.city || null, zip: prop.zip || null,
-              mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+              address: prop.address,
+              city: prop.city || null,
+              zip: prop.zip || null,
+              mailing_address: null,
+              mailing_city: null,
+              mailing_state: null,
+              mailing_zip: null,
               case_number: caseNum,
               filing_date: formatDate(filedDate),
-              assessed_value: null, tax_year: null,
-              lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+              assessed_value: null,
+              tax_year: null,
+              lender: null,
+              loan_amount: null,
+              sale_date: null,
+              sale_amount: null,
               description: `${county} County AL Divorce — ${caseName}`,
               source_url: url,
               raw_data: JSON.stringify({ caseNum, caseName, filedDate, parcelId: prop.parcelId }),

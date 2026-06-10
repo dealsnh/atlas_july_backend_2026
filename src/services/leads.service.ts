@@ -13,9 +13,7 @@ import { getRawSettings } from "./settings.service.js";
 import { runSkipTrace } from "./skip-trace.service.js";
 import { ApiError } from "../utils/api-error.js";
 
-export async function listLeads(
-  filters: LeadFilters,
-): Promise<{ leads: Lead[]; total: number }> {
+export async function listLeads(filters: LeadFilters): Promise<{ leads: Lead[]; total: number }> {
   const { limit = 100, offset = 0, ...rest } = filters;
   const total = await countLeads(rest);
   const leads = await findLeads({ ...rest, limit, offset });

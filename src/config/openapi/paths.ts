@@ -1,7 +1,4 @@
-import {
-  openApiParameters,
-  openApiResponses,
-} from "./schemas.js";
+import { openApiParameters, openApiResponses } from "./schemas.js";
 import { optBody, reqBody } from "./helpers.js";
 
 const leadFilters = [
@@ -18,7 +15,8 @@ const userJwtSecurity = [{ UserJwtAuth: [] }];
 const v1AuthSignup = {
   tags: ["Auth"],
   summary: "Register a new user",
-  description: "Creates a user in PostgreSQL and returns a JWT. Admin is auto-seeded from `ADMIN_EMAIL` on first startup.",
+  description:
+    "Creates a user in PostgreSQL and returns a JWT. Admin is auto-seeded from `ADMIN_EMAIL` on first startup.",
   operationId: "signupUser",
   requestBody: reqBody({
     "application/json": { schema: { $ref: "#/components/schemas/SignupBody" } },
@@ -410,7 +408,8 @@ export const openApiPaths = {
     post: {
       tags: ["Settings"],
       summary: "Save settings",
-      description: "Partial update. Send `••••••••••••••••` to keep existing secret values unchanged.",
+      description:
+        "Partial update. Send `••••••••••••••••` to keep existing secret values unchanged.",
       operationId: "saveSettings",
       security: authSecurity,
       requestBody: reqBody({
@@ -485,7 +484,8 @@ export const openApiPaths = {
     post: {
       tags: ["Scrape"],
       summary: "Trigger manual scrape",
-      description: "Starts an asynchronous scrape job. Returns immediately while scraping continues in background.",
+      description:
+        "Starts an asynchronous scrape job. Returns immediately while scraping continues in background.",
       operationId: "triggerScrape",
       security: authSecurity,
       requestBody: optBody({
@@ -655,7 +655,8 @@ export const openApiPaths = {
     delete: {
       tags: ["Admin"],
       summary: "Purge leads by filter",
-      description: "Permanently deletes leads matching at least one filter. Requires authentication.",
+      description:
+        "Permanently deletes leads matching at least one filter. Requires authentication.",
       operationId: "deleteLeads",
       security: authSecurity,
       requestBody: reqBody({

@@ -101,8 +101,7 @@ export async function startServer(): Promise<Server> {
 }
 
 const isMainModule =
-  process.argv[1] !== undefined &&
-  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (isMainModule) {
   startServer().catch((error) => {

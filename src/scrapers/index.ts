@@ -14,7 +14,11 @@ function countyName(county: CountyConfig): string {
   return county.name || (county as { county?: string }).county || "";
 }
 
-async function withTimeout<T>(label: string, fn: () => Promise<T>, ms = STATE_WIDE_TIMEOUT_MS): Promise<T> {
+async function withTimeout<T>(
+  label: string,
+  fn: () => Promise<T>,
+  ms = STATE_WIDE_TIMEOUT_MS,
+): Promise<T> {
   return Promise.race([
     fn(),
     new Promise<T>((_, reject) =>
@@ -51,10 +55,22 @@ function stateWideScrapers(
   if (state === "AL") {
     return [
       ["AL Bankruptcy", "Bankruptcy", () => alabama.scrapeBankruptcy(fromDate, toDate)],
-      ["AL Code Violations", "Code Violation", () => alabama.scrapeCodeViolations(fromDate, toDate)],
+      [
+        "AL Code Violations",
+        "Code Violation",
+        () => alabama.scrapeCodeViolations(fromDate, toDate),
+      ],
       ["AL Divorce/Eviction", "Divorce", () => alabama.scrapeDivorce(fromDate, toDate)],
-      ["AL Out-of-State Owners", "Out-of-State Owner", () => alabama.scrapeOutOfStateOwners(fromDate, toDate)],
-      ["AL Vacant/Abandoned", "Vacant/Abandoned", () => alabama.scrapeVacantAbandoned(fromDate, toDate)],
+      [
+        "AL Out-of-State Owners",
+        "Out-of-State Owner",
+        () => alabama.scrapeOutOfStateOwners(fromDate, toDate),
+      ],
+      [
+        "AL Vacant/Abandoned",
+        "Vacant/Abandoned",
+        () => alabama.scrapeVacantAbandoned(fromDate, toDate),
+      ],
     ];
   }
   if (state === "OH") {
@@ -63,8 +79,16 @@ function stateWideScrapers(
       ["OH Obituaries", "Obituary", () => ohio.scrapeObituaries(fromDate, toDate)],
       ["OH Code Violations", "Code Violation", () => ohio.scrapeCodeViolations(fromDate, toDate)],
       ["OH Divorce/Eviction", "Divorce", () => ohio.scrapeDivorce(fromDate, toDate)],
-      ["OH Out-of-State Owners", "Out-of-State Owner", () => ohio.scrapeOutOfStateOwners(fromDate, toDate)],
-      ["OH Vacant/Abandoned", "Vacant/Abandoned", () => ohio.scrapeVacantAbandoned(fromDate, toDate)],
+      [
+        "OH Out-of-State Owners",
+        "Out-of-State Owner",
+        () => ohio.scrapeOutOfStateOwners(fromDate, toDate),
+      ],
+      [
+        "OH Vacant/Abandoned",
+        "Vacant/Abandoned",
+        () => ohio.scrapeVacantAbandoned(fromDate, toDate),
+      ],
     ];
   }
   if (state === "SC") {
@@ -72,10 +96,22 @@ function stateWideScrapers(
       ["SC Bankruptcy", "Bankruptcy", () => southCarolina.scrapeBankruptcy(fromDate, toDate)],
       ["SC Obituaries", "Obituary", () => southCarolina.scrapeObituaries(fromDate, toDate)],
       ["SC FSBO", "FSBO", () => southCarolina.scrapeFSBO(fromDate, toDate)],
-      ["SC Code Violations", "Code Violation", () => southCarolina.scrapeCodeViolations(fromDate, toDate)],
+      [
+        "SC Code Violations",
+        "Code Violation",
+        () => southCarolina.scrapeCodeViolations(fromDate, toDate),
+      ],
       ["SC Divorce/Eviction", "Divorce", () => southCarolina.scrapeDivorce(fromDate, toDate)],
-      ["SC Out-of-State Owners", "Out-of-State Owner", () => southCarolina.scrapeOutOfStateOwners(fromDate, toDate)],
-      ["SC Vacant/Abandoned", "Vacant/Abandoned", () => southCarolina.scrapeVacantAbandoned(fromDate, toDate)],
+      [
+        "SC Out-of-State Owners",
+        "Out-of-State Owner",
+        () => southCarolina.scrapeOutOfStateOwners(fromDate, toDate),
+      ],
+      [
+        "SC Vacant/Abandoned",
+        "Vacant/Abandoned",
+        () => southCarolina.scrapeVacantAbandoned(fromDate, toDate),
+      ],
     ];
   }
   if (state === "WI") {
@@ -83,10 +119,22 @@ function stateWideScrapers(
       ["WI Obituaries", "Obituary", () => wisconsin.scrapeObituaries(fromDate, toDate)],
       ["WI FSBO", "FSBO", () => wisconsin.scrapeFSBO(fromDate, toDate)],
       ["WI Bankruptcy", "Bankruptcy", () => wisconsin.scrapeBankruptcy(fromDate, toDate)],
-      ["WI Code Violations", "Code Violation", () => wisconsin.scrapeCodeViolations(fromDate, toDate)],
+      [
+        "WI Code Violations",
+        "Code Violation",
+        () => wisconsin.scrapeCodeViolations(fromDate, toDate),
+      ],
       ["WI Divorce/Eviction", "Divorce", () => wisconsin.scrapeDivorce(fromDate, toDate)],
-      ["WI Out-of-State Owners", "Out-of-State Owner", () => wisconsin.scrapeOutOfStateOwners(fromDate, toDate)],
-      ["WI Vacant/Abandoned", "Vacant/Abandoned", () => wisconsin.scrapeVacantAbandoned(fromDate, toDate)],
+      [
+        "WI Out-of-State Owners",
+        "Out-of-State Owner",
+        () => wisconsin.scrapeOutOfStateOwners(fromDate, toDate),
+      ],
+      [
+        "WI Vacant/Abandoned",
+        "Vacant/Abandoned",
+        () => wisconsin.scrapeVacantAbandoned(fromDate, toDate),
+      ],
     ];
   }
   return [];
@@ -266,6 +314,8 @@ export function getDefaultDateRange(): { fromDate: string; toDate: string } {
 
 export function getDateRange(daysBack: number): { fromDate: string; toDate: string } {
   const toDate = new Date().toISOString().split("T")[0];
-  const fromDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const fromDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .split("T")[0];
   return { fromDate, toDate };
 }

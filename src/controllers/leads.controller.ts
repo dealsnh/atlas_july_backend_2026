@@ -1,10 +1,5 @@
 import type { Request, Response } from "express";
-import {
-  exportLeadsCsv,
-  listLeads,
-  patchLead,
-  skipTraceLead,
-} from "../services/leads.service.js";
+import { exportLeadsCsv, listLeads, patchLead, skipTraceLead } from "../services/leads.service.js";
 import { getRawSettings } from "../services/settings.service.js";
 import { ApiError } from "../utils/api-error.js";
 import { successResponse } from "../utils/api-response.js";

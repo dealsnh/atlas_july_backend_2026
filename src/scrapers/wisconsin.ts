@@ -32,7 +32,11 @@ const COUNTY_CODES: Record<string, string> = {
 };
 
 // ─── SHERIFF SALES (Foreclosure) ─────────────────────────────────────────────
-async function scrapeSheriffSales(county: string, fromDate: string, toDate: string): Promise<Lead[]> {
+async function scrapeSheriffSales(
+  county: string,
+  fromDate: string,
+  toDate: string,
+): Promise<Lead[]> {
   const leads: Lead[] = [];
 
   const urls: Record<string, string> = {
@@ -53,14 +57,18 @@ async function scrapeSheriffSales(county: string, fromDate: string, toDate: stri
 
     // Detect table header to determine column order
     let colMap = { caseNum: 0, address: 1, saleDate: 2, amount: 3, plaintiff: 4 };
-    $("table tr").first().find("th, td").each((i, el) => {
-      const h = $(el).text().trim().toLowerCase();
-      if (h.includes("case")) colMap.caseNum = i;
-      else if (h.includes("address") || h.includes("property")) colMap.address = i;
-      else if (h.includes("sale date") || h.includes("date")) colMap.saleDate = i;
-      else if (h.includes("amount") || h.includes("price")) colMap.amount = i;
-      else if (h.includes("plaintiff") || h.includes("lender") || h.includes("status")) colMap.plaintiff = i;
-    });
+    $("table tr")
+      .first()
+      .find("th, td")
+      .each((i, el) => {
+        const h = $(el).text().trim().toLowerCase();
+        if (h.includes("case")) colMap.caseNum = i;
+        else if (h.includes("address") || h.includes("property")) colMap.address = i;
+        else if (h.includes("sale date") || h.includes("date")) colMap.saleDate = i;
+        else if (h.includes("amount") || h.includes("price")) colMap.amount = i;
+        else if (h.includes("plaintiff") || h.includes("lender") || h.includes("status"))
+          colMap.plaintiff = i;
+      });
 
     // Most WI county sheriff sale pages list properties in tables or definition lists
     $("table tr, .sale-item, .property-row, article, .listing").each((_, el) => {
@@ -111,7 +119,9 @@ async function scrapeSheriffSales(county: string, fromDate: string, toDate: stri
       const linkText = $(el).text().trim();
       if (
         (href.includes(".pdf") || href.includes(".csv") || href.includes("sale")) &&
-        (linkText.toLowerCase().includes("sale") || linkText.toLowerCase().includes("foreclosure") || linkText.toLowerCase().includes("list"))
+        (linkText.toLowerCase().includes("sale") ||
+          linkText.toLowerCase().includes("foreclosure") ||
+          linkText.toLowerCase().includes("list"))
       ) {
         const fullHref = href.startsWith("http") ? href : `https://www.danesheriff.com${href}`;
         leads.push({
@@ -148,7 +158,11 @@ async function scrapeSheriffSales(county: string, fromDate: string, toDate: stri
 }
 
 // ─── TAX DELINQUENT ───────────────────────────────────────────────────────────
-async function scrapeTaxDelinquent(county: string, fromDate: string, toDate: string): Promise<Lead[]> {
+async function scrapeTaxDelinquent(
+  county: string,
+  fromDate: string,
+  toDate: string,
+): Promise<Lead[]> {
   const leads: Lead[] = [];
 
   const urls: Record<string, string> = {
@@ -215,7 +229,9 @@ async function scrapeTaxDelinquent(county: string, fromDate: string, toDate: str
         const linkText = $(el).text().trim();
         if (
           (href.includes(".pdf") || href.includes(".csv") || href.includes(".xlsx")) &&
-          (linkText.toLowerCase().includes("delinquent") || linkText.toLowerCase().includes("tax") || linkText.toLowerCase().includes("list"))
+          (linkText.toLowerCase().includes("delinquent") ||
+            linkText.toLowerCase().includes("tax") ||
+            linkText.toLowerCase().includes("list"))
         ) {
           const fullHref = href.startsWith("http") ? href : `${url}${href}`;
           leads.push({
@@ -247,7 +263,9 @@ async function scrapeTaxDelinquent(county: string, fromDate: string, toDate: str
       });
 
       if (leads.length > 0) break; // got data, no need to try fallback
-    } catch { /* try next URL */ }
+    } catch {
+      /* try next URL */
+    }
   }
   return leads;
 }
@@ -264,9 +282,9 @@ async function scrapeProbate(county: string, fromDate: string, toDate: string): 
   try {
     const headers = {
       "Content-Type": "application/json",
-      "Accept": "application/json",
-      "Referer": "https://wcca.wicourts.gov/advanced.html",
-      "Origin": "https://wcca.wicourts.gov",
+      Accept: "application/json",
+      Referer: "https://wcca.wicourts.gov/advanced.html",
+      Origin: "https://wcca.wicourts.gov",
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     };
 
@@ -293,7 +311,10 @@ async function scrapeProbate(county: string, fromDate: string, toDate: string): 
 
     if (!res.ok) return leads;
 
-    const data = await res.json() as { result?: { cases?: Array<Record<string, string>> }; cases?: Array<Record<string, string>> };
+    const data = (await res.json()) as {
+      result?: { cases?: Array<Record<string, string>> };
+      cases?: Array<Record<string, string>>;
+    };
     const cases = data?.result?.cases || data?.cases || [];
     for (const c of cases) {
       // Skip if no case number
@@ -336,7 +357,8 @@ async function scrapeObituaries(fromDate: string, toDate: string): Promise<Lead[
   const leads: Lead[] = [];
   try {
     // legacy.com Wisconsin obituaries
-    const url = "https://www.legacy.com/us/obituaries/madison/browse?dateRange=last30Days&countryId=1&regionId=50";
+    const url =
+      "https://www.legacy.com/us/obituaries/madison/browse?dateRange=last30Days&countryId=1&regionId=50";
     const res = await fetchWithRetry(url);
     if (!res.ok) return leads;
 
@@ -346,14 +368,20 @@ async function scrapeObituaries(fromDate: string, toDate: string): Promise<Lead[
     $("li[data-obit-id], .obit-listing, article.obit, .Obituary").each((_, el) => {
       const name = $(el).find("h3, .name, .obit-name, [class*='Name']").first().text().trim();
       const location = $(el).find(".location, .city, [class*='Location']").first().text().trim();
-      const date = $(el).find("time").attr("datetime") || $(el).find(".date, [class*='Date']").first().text().trim();
+      const date =
+        $(el).find("time").attr("datetime") ||
+        $(el).find(".date, [class*='Date']").first().text().trim();
       const link = $(el).find("a").first().attr("href");
 
       if (!name) return;
 
-      const county = location.toLowerCase().includes("janesville") || location.toLowerCase().includes("beloit") ? "Rock"
-        : location.toLowerCase().includes("door") || location.toLowerCase().includes("sturgeon bay") ? "Door"
-        : "Dane";
+      const county =
+        location.toLowerCase().includes("janesville") || location.toLowerCase().includes("beloit")
+          ? "Rock"
+          : location.toLowerCase().includes("door") ||
+              location.toLowerCase().includes("sturgeon bay")
+            ? "Door"
+            : "Dane";
 
       leads.push({
         id: makeId(county, STATE, "Obituary", name + (date || "")),
@@ -399,17 +427,30 @@ async function scrapeFSBO(fromDate: string, toDate: string): Promise<Lead[]> {
     const $ = cheerio.load(html);
 
     $("li.result-row, .cl-search-result, .result").each((_, el) => {
-      const title = $(el).find(".result-title, .title-anchor, a.posting-title").first().text().trim();
+      const title = $(el)
+        .find(".result-title, .title-anchor, a.posting-title")
+        .first()
+        .text()
+        .trim();
       const price = $(el).find(".result-price, .priceinfo").first().text().trim();
       const date = $(el).find("time").attr("datetime") || "";
       const link = $(el).find("a").first().attr("href") || "";
-      const location = $(el).find(".result-hood, .supertitle").first().text().trim().replace(/[()]/g, "");
+      const location = $(el)
+        .find(".result-hood, .supertitle")
+        .first()
+        .text()
+        .trim()
+        .replace(/[()]/g, "");
 
       if (!title) return;
 
-      const county = location.toLowerCase().includes("janesville") || location.toLowerCase().includes("beloit") ? "Rock"
-        : location.toLowerCase().includes("door") || location.toLowerCase().includes("sturgeon bay") ? "Door"
-        : "Dane";
+      const county =
+        location.toLowerCase().includes("janesville") || location.toLowerCase().includes("beloit")
+          ? "Rock"
+          : location.toLowerCase().includes("door") ||
+              location.toLowerCase().includes("sturgeon bay")
+            ? "Door"
+            : "Dane";
 
       leads.push({
         id: makeId(county, STATE, "FSBO", link || title),
@@ -446,31 +487,49 @@ async function scrapeFSBO(fromDate: string, toDate: string): Promise<Lead[]> {
 // ─── BANKRUPTCY — Eastern District of WI (ecf.wieb.uscourts.gov) ─────────────
 
 // ─── PRE-FORECLOSURE — Wisconsin WCCA civil filings ──────────────────────────
-export async function scrapePreForeclosure(county: string, fromDate: string, toDate: string): Promise<Lead[]> {
+export async function scrapePreForeclosure(
+  county: string,
+  fromDate: string,
+  toDate: string,
+): Promise<Lead[]> {
   const leads: Lead[] = [];
   try {
     // WCCA public records - foreclosure filings (case type FC)
     const url = `https://wcca.wicourts.gov/jsonPost/searchCases?countyNo=${encodeURIComponent(county)}&caseType=FC&dateOfFilingStart=${fromDate}&dateOfFilingEnd=${toDate}&recordsPerPage=25`;
-    const res = await fetchWithRetry(url, { headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" } });
+    const res = await fetchWithRetry(url, {
+      headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" },
+    });
     if (res.ok) {
-      const data = await res.json() as { cases?: unknown[] };
+      const data = (await res.json()) as { cases?: unknown[] };
       for (const c of (data?.cases || []) as Record<string, unknown>[]) {
         const parties = (c.parties as Record<string, unknown>[]) || [];
-        const defendant = parties.find((p: Record<string, unknown>) => String(p.partyTypeCode || "").includes("D"));
+        const defendant = parties.find((p: Record<string, unknown>) =>
+          String(p.partyTypeCode || "").includes("D"),
+        );
         const ownerName = defendant ? String(defendant.fullName || "") : "";
         const caseNum = String(c.caseNo || "");
         const filedDate = String(c.filingDate || "");
         leads.push({
           id: makeId("PREFC", caseNum, county, "WI"),
-          county, state: "WI",
+          county,
+          state: "WI",
           lead_type: "Pre-Foreclosure",
           owner_name: ownerName || null,
-          address: null, city: county, zip: null,
-          mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+          address: null,
+          city: county,
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
           case_number: caseNum,
           filing_date: formatDate(filedDate),
-          assessed_value: null, tax_year: null,
-          lender: null, loan_amount: null, sale_date: null, sale_amount: null,
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
           description: `${county} County WI Pre-Foreclosure — ${caseNum}`,
           source_url: "https://wcca.wicourts.gov/",
           raw_data: JSON.stringify(c),
@@ -491,27 +550,46 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
     const xml = await rss.text();
     const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
     for (const item of items) {
-      const title = (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) || item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
-      const link  = (item.match(/<link>(.+?)<\/link>/))?.[1]?.trim() || "";
-      const desc  = (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) || item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
-      const pubDate = (item.match(/<pubDate>(.+?)<\/pubDate>/))?.[1]?.trim() || "";
-      const caseNum = (title.match(/([0-9]{2}-[0-9]{5})/)?.[1]) || title;
+      const title =
+        (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) ||
+          item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
+      const link = item.match(/<link>(.+?)<\/link>/)?.[1]?.trim() || "";
+      const desc =
+        (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) ||
+          item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
+      const pubDate = item.match(/<pubDate>(.+?)<\/pubDate>/)?.[1]?.trim() || "";
+      const caseNum = title.match(/([0-9]{2}-[0-9]{5})/)?.[1] || title;
       // Extract owner name from title: "26-70730-13 Jesse Ray Evin Keeton" -> "Jesse Ray Evin Keeton"
       const ownerFromTitle = title.replace(/^[0-9]{2}-[0-9]{5}(-[0-9]+)?\s*/, "").trim();
-      const caseName = ownerFromTitle || desc.replace(/<[^>]+>/g, "").replace(/&[a-z0-9#]+;/g, "").trim();
+      const caseName =
+        ownerFromTitle ||
+        desc
+          .replace(/<[^>]+>/g, "")
+          .replace(/&[a-z0-9#]+;/g, "")
+          .trim();
       leads.push({
         id: makeId("WI", STATE, "Bankruptcy", caseNum),
         county: "WI",
         state: STATE,
         lead_type: "Bankruptcy",
         owner_name: caseName || caseNum,
-        address: "", city: "", zip: "",
-        mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null,
+        address: "",
+        city: "",
+        zip: "",
+        mailing_address: null,
+        mailing_city: null,
+        mailing_state: null,
+        mailing_zip: null,
         case_number: caseNum,
-        filing_date: pubDate ? formatDate(new Date(pubDate).toISOString().slice(0,10)) : formatDate(fromDate),
-        assessed_value: null, tax_year: null,
-        lender: null, loan_amount: null,
-        sale_date: null, sale_amount: null,
+        filing_date: pubDate
+          ? formatDate(new Date(pubDate).toISOString().slice(0, 10))
+          : formatDate(fromDate),
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
+        sale_date: null,
+        sale_amount: null,
         source_url: link || "https://ecf.wieb.uscourts.gov/cgi-bin/rss_outside.pl",
         description: `WI Bankruptcy — ${caseName || caseNum}`,
         raw_data: JSON.stringify({ title, caseNum, caseName, pubDate }),
@@ -530,18 +608,48 @@ export async function scrapeCodeViolations(fromDate: string, toDate: string): Pr
   const leads: Lead[] = [];
   try {
     const url = `https://www.courtlistener.com/api/rest/v4/dockets/?court=wied&date_filed__gte=${fromDate}&date_filed__lte=${toDate}&nature_of_suit=440&order_by=-date_filed&page_size=50`;
-    const res = await fetchWithRetry(url, { headers: { "User-Agent": "Atlas/1.0", Accept: "application/json" } });
+    const res = await fetchWithRetry(url, {
+      headers: { "User-Agent": "Atlas/1.0", Accept: "application/json" },
+    });
     if (res.ok) {
-      const data = await res.json() as { results?: unknown[] };
+      const data = (await res.json()) as { results?: unknown[] };
       for (const r of (data?.results || []) as Record<string, unknown>[]) {
         const caseName = String(r.case_name || "");
         const caseNum = String(r.docket_number || "");
         const filedDate = String(r.date_filed || "");
         if (!caseName && !caseNum) continue;
-        leads.push({ id: makeId("CV", caseNum || caseName, "WI", "code"), county: "WI", state: "WI", lead_type: "Code Violation", owner_name: caseName || null, address: null, city: null, zip: null, mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null, case_number: caseNum || null, filing_date: formatDate(filedDate), assessed_value: null, tax_year: null, lender: null, loan_amount: null, sale_date: null, sale_amount: null, description: `Code Violation — ${caseName || caseNum}`, source_url: r.absolute_url ? `https://www.courtlistener.com${r.absolute_url}` : "https://www.courtlistener.com/", raw_data: JSON.stringify({ caseName, caseNum, filedDate }) });
+        leads.push({
+          id: makeId("CV", caseNum || caseName, "WI", "code"),
+          county: "WI",
+          state: "WI",
+          lead_type: "Code Violation",
+          owner_name: caseName || null,
+          address: null,
+          city: null,
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
+          case_number: caseNum || null,
+          filing_date: formatDate(filedDate),
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
+          description: `Code Violation — ${caseName || caseNum}`,
+          source_url: r.absolute_url
+            ? `https://www.courtlistener.com${r.absolute_url}`
+            : "https://www.courtlistener.com/",
+          raw_data: JSON.stringify({ caseName, caseNum, filedDate }),
+        });
       }
     }
-  } catch (e) { console.error("[WI] Code Violations error:", e); }
+  } catch (e) {
+    console.error("[WI] Code Violations error:", e);
+  }
   return leads;
 }
 
@@ -554,17 +662,55 @@ export async function scrapeDivorce(fromDate: string, toDate: string): Promise<L
       const xml = await rssRes.text();
       const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
       for (const item of items) {
-        const title = (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) || item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
-        const link = (item.match(/<link>(.+?)<\/link>/))?.[1]?.trim() || "";
-        const pubDate = (item.match(/<pubDate>(.+?)<\/pubDate>/))?.[1]?.trim() || "";
-        const desc = (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) || item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
+        const title =
+          (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) ||
+            item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
+        const link = item.match(/<link>(.+?)<\/link>/)?.[1]?.trim() || "";
+        const pubDate = item.match(/<pubDate>(.+?)<\/pubDate>/)?.[1]?.trim() || "";
+        const desc =
+          (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) ||
+            item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
         if (!title) continue;
         const lower = (title + " " + desc).toLowerCase();
-        if (!lower.includes("matrimon") && !lower.includes("divorce") && !lower.includes("dissolution") && !lower.includes("evict")) continue;
-        leads.push({ id: makeId("DIV", title, "WI", "divorce"), county: "WI", state: "WI", lead_type: "Divorce", owner_name: title.split(/\s+v\.?\s+/i).join(" & "), address: null, city: null, zip: null, mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null, case_number: null, filing_date: pubDate ? formatDate(new Date(pubDate).toISOString().slice(0,10)) : formatDate(fromDate), assessed_value: null, tax_year: null, lender: null, loan_amount: null, sale_date: null, sale_amount: null, description: `Divorce / Eviction — ${title}`, source_url: link || "https://ecf.wied.uscourts.gov/cgi-bin/rss_outside.pl", raw_data: JSON.stringify({ title, pubDate, desc }) });
+        if (
+          !lower.includes("matrimon") &&
+          !lower.includes("divorce") &&
+          !lower.includes("dissolution") &&
+          !lower.includes("evict")
+        )
+          continue;
+        leads.push({
+          id: makeId("DIV", title, "WI", "divorce"),
+          county: "WI",
+          state: "WI",
+          lead_type: "Divorce",
+          owner_name: title.split(/\s+v\.?\s+/i).join(" & "),
+          address: null,
+          city: null,
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
+          case_number: null,
+          filing_date: pubDate
+            ? formatDate(new Date(pubDate).toISOString().slice(0, 10))
+            : formatDate(fromDate),
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
+          description: `Divorce / Eviction — ${title}`,
+          source_url: link || "https://ecf.wied.uscourts.gov/cgi-bin/rss_outside.pl",
+          raw_data: JSON.stringify({ title, pubDate, desc }),
+        });
       }
     }
-  } catch (e) { console.error("[WI] Divorce/Eviction error:", e); }
+  } catch (e) {
+    console.error("[WI] Divorce/Eviction error:", e);
+  }
   return leads;
 }
 
@@ -573,18 +719,48 @@ export async function scrapeOutOfStateOwners(fromDate: string, toDate: string): 
   const leads: Lead[] = [];
   try {
     const url = `https://www.courtlistener.com/api/rest/v4/dockets/?court=wied&date_filed__gte=${fromDate}&date_filed__lte=${toDate}&nature_of_suit=290&order_by=-date_filed&page_size=50`;
-    const res = await fetchWithRetry(url, { headers: { "User-Agent": "Atlas/1.0", Accept: "application/json" } });
+    const res = await fetchWithRetry(url, {
+      headers: { "User-Agent": "Atlas/1.0", Accept: "application/json" },
+    });
     if (res.ok) {
-      const data = await res.json() as { results?: unknown[] };
+      const data = (await res.json()) as { results?: unknown[] };
       for (const r of (data?.results || []) as Record<string, unknown>[]) {
         const caseName = String(r.case_name || "");
         const caseNum = String(r.docket_number || "");
         const filedDate = String(r.date_filed || "");
         if (!caseName && !caseNum) continue;
-        leads.push({ id: makeId("OOS", caseNum || caseName, "WI", "oos"), county: "WI", state: "WI", lead_type: "Vacant/Abandoned", owner_name: caseName || null, address: null, city: null, zip: null, mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null, case_number: caseNum || null, filing_date: formatDate(filedDate), assessed_value: null, tax_year: null, lender: null, loan_amount: null, sale_date: null, sale_amount: null, description: `Out-of-State Owner — ${caseName || caseNum}`, source_url: r.absolute_url ? `https://www.courtlistener.com${r.absolute_url}` : "https://www.courtlistener.com/", raw_data: JSON.stringify({ caseName, caseNum, filedDate }) });
+        leads.push({
+          id: makeId("OOS", caseNum || caseName, "WI", "oos"),
+          county: "WI",
+          state: "WI",
+          lead_type: "Vacant/Abandoned",
+          owner_name: caseName || null,
+          address: null,
+          city: null,
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
+          case_number: caseNum || null,
+          filing_date: formatDate(filedDate),
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
+          description: `Out-of-State Owner — ${caseName || caseNum}`,
+          source_url: r.absolute_url
+            ? `https://www.courtlistener.com${r.absolute_url}`
+            : "https://www.courtlistener.com/",
+          raw_data: JSON.stringify({ caseName, caseNum, filedDate }),
+        });
       }
     }
-  } catch (e) { console.error("[WI] Out-of-State Owners error:", e); }
+  } catch (e) {
+    console.error("[WI] Out-of-State Owners error:", e);
+  }
   return leads;
 }
 
@@ -597,17 +773,50 @@ export async function scrapeVacantAbandoned(fromDate: string, toDate: string): P
       const xml = await rssRes.text();
       const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
       for (const item of items) {
-        const title = (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) || item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
-        const link = (item.match(/<link>(.+?)<\/link>/))?.[1]?.trim() || "";
-        const pubDate = (item.match(/<pubDate>(.+?)<\/pubDate>/))?.[1]?.trim() || "";
-        const desc = (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) || item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
+        const title =
+          (item.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) ||
+            item.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
+        const link = item.match(/<link>(.+?)<\/link>/)?.[1]?.trim() || "";
+        const pubDate = item.match(/<pubDate>(.+?)<\/pubDate>/)?.[1]?.trim() || "";
+        const desc =
+          (item.match(/<description><!\[CDATA\[(.+?)\]\]><\/description>/) ||
+            item.match(/<description>(.+?)<\/description>/))?.[1]?.trim() || "";
         if (!title) continue;
         const lower = (title + " " + desc).toLowerCase();
-        if (!lower.includes("chapter 7") && !lower.includes("vacant") && !lower.includes("abandon")) continue;
-        leads.push({ id: makeId("VAC", title, "WI", "vacant"), county: "WI", state: "WI", lead_type: "Vacant/Abandoned", owner_name: title.split(/\s+v\.?\s+/i)[0]?.trim() || title, address: null, city: null, zip: null, mailing_address: null, mailing_city: null, mailing_state: null, mailing_zip: null, case_number: null, filing_date: pubDate ? formatDate(new Date(pubDate).toISOString().slice(0,10)) : formatDate(fromDate), assessed_value: null, tax_year: null, lender: null, loan_amount: null, sale_date: null, sale_amount: null, description: `Vacant/Abandoned — Chapter 7 — ${title}`, source_url: link || "https://ecf.wieb.uscourts.gov/cgi-bin/rss_outside.pl", raw_data: JSON.stringify({ title, pubDate, desc }) });
+        if (!lower.includes("chapter 7") && !lower.includes("vacant") && !lower.includes("abandon"))
+          continue;
+        leads.push({
+          id: makeId("VAC", title, "WI", "vacant"),
+          county: "WI",
+          state: "WI",
+          lead_type: "Vacant/Abandoned",
+          owner_name: title.split(/\s+v\.?\s+/i)[0]?.trim() || title,
+          address: null,
+          city: null,
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
+          case_number: null,
+          filing_date: pubDate
+            ? formatDate(new Date(pubDate).toISOString().slice(0, 10))
+            : formatDate(fromDate),
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
+          description: `Vacant/Abandoned — Chapter 7 — ${title}`,
+          source_url: link || "https://ecf.wieb.uscourts.gov/cgi-bin/rss_outside.pl",
+          raw_data: JSON.stringify({ title, pubDate, desc }),
+        });
       }
     }
-  } catch (e) { console.error("[WI] Vacant/Abandoned error:", e); }
+  } catch (e) {
+    console.error("[WI] Vacant/Abandoned error:", e);
+  }
   return leads;
 }
 
@@ -660,9 +869,7 @@ export async function scrapeAll(fromDate: string, toDate: string): Promise<Lead[
     scrapeDivorce(fromDate, toDate),
     scrapeOutOfStateOwners(fromDate, toDate),
     scrapeVacantAbandoned(fromDate, toDate),
-  
-  
   ]);
 
-  return results.flatMap(r => r.status === "fulfilled" ? r.value : []);
+  return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
 }

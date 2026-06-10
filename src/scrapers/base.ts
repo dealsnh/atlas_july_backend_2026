@@ -40,32 +40,36 @@ export function formatDate(d: string | null | undefined): string | null {
 
 // URLs that should NEVER go through ScraperAPI
 const SKIP_SCRAPER_PATTERNS = [
-  "uscourts.gov",      // PACER — requires court auth
-  "craigslist.org",    // Craigslist — blocks ScraperAPI too
-  "scraperapi.com",    // Already proxied
-  "api.scraperapi",    // Already proxied
-  "opendata.",         // Open data APIs
-  "data.kcmo.org/resource/",  // KCMO Socrata — no bot blocking, direct is fine
-  "data.cincinnati-oh.gov/",  // Cincinnati open data — direct JSON
-  "16thcircuit.org/",  // Jackson MO delinquent land tax — direct ASP pages
-  "hcauditor.org",     // Hamilton OH auditor XLSX + wedge property search
-  "madisontc.com",     // Madison AL tax certificate XLSX
-  "services3.arcgis.com/",    // Jackson MO ArcGIS
-  "services.arcgis.com/",     // AL county ArcGIS
-  "arcgis/rest/services",     // ArcGIS REST queries
-  "rss_outside",       // PACER RSS — requires direct (no ScraperAPI)
-  "ecf.oh",            // PACER Ohio — direct RSS works
+  "uscourts.gov", // PACER — requires court auth
+  "craigslist.org", // Craigslist — blocks ScraperAPI too
+  "scraperapi.com", // Already proxied
+  "api.scraperapi", // Already proxied
+  "opendata.", // Open data APIs
+  "data.kcmo.org/resource/", // KCMO Socrata — no bot blocking, direct is fine
+  "data.cincinnati-oh.gov/", // Cincinnati open data — direct JSON
+  "16thcircuit.org/", // Jackson MO delinquent land tax — direct ASP pages
+  "hcauditor.org", // Hamilton OH auditor XLSX + wedge property search
+  "madisontc.com", // Madison AL tax certificate XLSX
+  "services3.arcgis.com/", // Jackson MO ArcGIS
+  "services.arcgis.com/", // AL county ArcGIS
+  "arcgis/rest/services", // ArcGIS REST queries
+  "rss_outside", // PACER RSS — requires direct (no ScraperAPI)
+  "ecf.oh", // PACER Ohio — direct RSS works
 ];
 
 function shouldSkipScraperAPI(url: string): boolean {
-  return SKIP_SCRAPER_PATTERNS.some(p => url.includes(p));
+  return SKIP_SCRAPER_PATTERNS.some((p) => url.includes(p));
 }
 
 /**
  * fetchWithRetry — standard HTML fetch, routes through ScraperAPI for
  * government/county sites that block server IPs (403/timeout).
  */
-export async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 3): Promise<Response> {
+export async function fetchWithRetry(
+  url: string,
+  options: RequestInit = {},
+  retries = 3,
+): Promise<Response> {
   const SCRAPER_KEY = process.env.SCRAPER_API_KEY;
   const useProxy = !!SCRAPER_KEY && !shouldSkipScraperAPI(url);
   const fetchUrl = useProxy
@@ -73,8 +77,9 @@ export async function fetchWithRetry(url: string, options: RequestInit = {}, ret
     : url;
 
   const headers = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "User-Agent":
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
     ...options.headers,
   };
@@ -91,13 +96,13 @@ export async function fetchWithRetry(url: string, options: RequestInit = {}, ret
       }
       if (res.ok || res.status === 404) return res;
       if (res.status === 429 || res.status >= 500) {
-        await new Promise(r => setTimeout(r, 2000 * (i + 1)));
+        await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
         continue;
       }
       return res;
     } catch (e) {
       if (i === retries - 1) throw e;
-      await new Promise(r => setTimeout(r, 1500 * (i + 1)));
+      await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
     }
   }
   throw new Error(`Failed after ${retries} retries: ${url}`);
@@ -129,13 +134,13 @@ export async function fetchRendered(url: string, retries = 2): Promise<Response>
       }
       if (res.ok || res.status === 404) return res;
       if (res.status === 429 || res.status >= 500) {
-        await new Promise(r => setTimeout(r, 3000 * (i + 1)));
+        await new Promise((r) => setTimeout(r, 3000 * (i + 1)));
         continue;
       }
       return res;
     } catch (e) {
       if (i === retries - 1) throw e;
-      await new Promise(r => setTimeout(r, 2000 * (i + 1)));
+      await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
     }
   }
   throw new Error(`fetchRendered failed after ${retries} retries: ${url}`);
@@ -148,7 +153,13 @@ export async function fetchRendered(url: string, retries = 2): Promise<Response>
  */
 export async function proxiedFetch(
   url: string,
-  options: { render?: boolean; method?: string; body?: string; contentType?: string; retries?: number } = {}
+  options: {
+    render?: boolean;
+    method?: string;
+    body?: string;
+    contentType?: string;
+    retries?: number;
+  } = {},
 ): Promise<Response> {
   const { render = false, method = "GET", body, contentType, retries = 3 } = options;
   if (render) {
@@ -157,7 +168,7 @@ export async function proxiedFetch(
   return fetchWithRetry(
     url,
     { method, body, headers: contentType ? { "Content-Type": contentType } : {} },
-    retries
+    retries,
   );
 }
 

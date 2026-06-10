@@ -7,12 +7,7 @@ export function notFoundHandler(_req: Request, _res: Response, next: NextFunctio
   next(ApiError.notFound("Route not found"));
 }
 
-export function errorHandler(
-  err: unknown,
-  req: Request,
-  res: Response,
-  _next: NextFunction,
-): void {
+export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction): void {
   const requestId = req.requestId;
 
   if (err instanceof ApiError) {

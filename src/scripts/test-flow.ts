@@ -26,7 +26,10 @@ function fail(name: string, detail: string): void {
   console.error(`✗ ${name} — ${detail}`);
 }
 
-async function getJson(path: string, token?: string): Promise<{ status: number; body: Record<string, unknown> }> {
+async function getJson(
+  path: string,
+  token?: string,
+): Promise<{ status: number; body: Record<string, unknown> }> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
   if (API_KEY) headers["x-api-key"] = API_KEY;
@@ -105,7 +108,10 @@ async function main(): Promise<void> {
         token = data.token;
         pass("POST /api/v1/auth/login", ADMIN_EMAIL);
       } else {
-        pass("POST /api/v1/auth/login", `skipped (${login.body.message ?? login.status}) — using API_KEY`);
+        pass(
+          "POST /api/v1/auth/login",
+          `skipped (${login.body.message ?? login.status}) — using API_KEY`,
+        );
       }
     } catch (e) {
       pass("POST /api/v1/auth/login", `skipped — ${e instanceof Error ? e.message : String(e)}`);
@@ -182,9 +188,14 @@ async function main(): Promise<void> {
     const leadData = leadList.body.data as { leads?: Array<{ id: string }> } | undefined;
     const leadId = leadData?.leads?.[0]?.id;
     if (leadId) {
-      const st = await postJson(`/api/v1/leads/${leadId}/skip-trace`, undefined, token || undefined);
+      const st = await postJson(
+        `/api/v1/leads/${leadId}/skip-trace`,
+        undefined,
+        token || undefined,
+      );
       if (st.status === 200) pass("POST /api/v1/leads/:id/skip-trace");
-      else pass("POST /api/v1/leads/:id/skip-trace", `skipped (${st.status}) — API may need real key`);
+      else
+        pass("POST /api/v1/leads/:id/skip-trace", `skipped (${st.status}) — API may need real key`);
     }
   } else {
     pass("POST /api/v1/leads/:id/skip-trace", "skipped — SKIP_TRACE_KEY not set");

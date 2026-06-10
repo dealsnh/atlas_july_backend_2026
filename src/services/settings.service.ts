@@ -59,7 +59,10 @@ export async function getRawSettings(): Promise<AppSettings> {
 export async function getEmailRecipients(): Promise<string[]> {
   const settings = await getSettings();
   const fromSettings = settings.email_recipients
-    ? settings.email_recipients.split(",").map((e) => e.trim()).filter(Boolean)
+    ? settings.email_recipients
+        .split(",")
+        .map((e) => e.trim())
+        .filter(Boolean)
     : [];
   if (fromSettings.length > 0) return fromSettings;
   return clientConfig.email ? [clientConfig.email] : [];

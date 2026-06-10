@@ -34,10 +34,9 @@ export async function getScrapeRuns(limit = 100): Promise<ScrapeRun[]> {
 }
 
 export async function getKV(key: string): Promise<string | null> {
-  const row = await queryOne<{ value: string }>(
-    "SELECT value FROM settings WHERE key = $1",
-    [`__kv_${key}`],
-  );
+  const row = await queryOne<{ value: string }>("SELECT value FROM settings WHERE key = $1", [
+    `__kv_${key}`,
+  ]);
   return row?.value ?? null;
 }
 

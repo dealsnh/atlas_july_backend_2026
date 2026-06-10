@@ -1,11 +1,7 @@
 import type { Request, Response } from "express";
 import { clientConfig } from "../config/constants.js";
 import { sendDailyReport } from "../services/email.service.js";
-import {
-  getMaskedSettings,
-  getRawSettings,
-  updateSettings,
-} from "../services/settings.service.js";
+import { getMaskedSettings, getRawSettings, updateSettings } from "../services/settings.service.js";
 import { ApiError } from "../utils/api-error.js";
 import { successResponse } from "../utils/api-response.js";
 
@@ -21,8 +17,7 @@ export async function saveSettingsHandler(req: Request, res: Response): Promise<
 export async function testEmailHandler(req: Request, res: Response): Promise<void> {
   const settings = await getRawSettings();
   const testRecipient =
-    (req.body as { email?: string }).email ||
-    settings.email_recipients?.split(",")[0]?.trim();
+    (req.body as { email?: string }).email || settings.email_recipients?.split(",")[0]?.trim();
 
   if (!testRecipient) {
     throw ApiError.badRequest("No recipient email");

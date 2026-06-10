@@ -1,10 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import swaggerUi from "swagger-ui-express";
-import {
-  OPENAPI_DOCS_PATH,
-  OPENAPI_JSON_PATH,
-  buildOpenApiSpec,
-} from "../config/openapi/index.js";
+import { OPENAPI_DOCS_PATH, OPENAPI_JSON_PATH, buildOpenApiSpec } from "../config/openapi/index.js";
 
 const router: IRouter = Router();
 

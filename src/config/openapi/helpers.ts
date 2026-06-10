@@ -49,12 +49,8 @@ export function optProp(key: string, schema: SchemaProp): [string, SchemaProp] {
 }
 
 /** Build properties object; listed keys are optional (description gets `?`). */
-export function optProps(
-  entries: Record<string, SchemaProp>,
-): Record<string, SchemaProp> {
-  return Object.fromEntries(
-    Object.entries(entries).map(([key, schema]) => optProp(key, schema)),
-  );
+export function optProps(entries: Record<string, SchemaProp>): Record<string, SchemaProp> {
+  return Object.fromEntries(Object.entries(entries).map(([key, schema]) => optProp(key, schema)));
 }
 
 /** Required schema property — no `?`. */

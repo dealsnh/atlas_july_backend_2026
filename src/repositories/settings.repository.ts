@@ -3,9 +3,7 @@ import { execute, query } from "../db/query.js";
 import type { AppSettings } from "../types/settings.js";
 
 export async function getSettings(): Promise<AppSettings> {
-  const rows = await query<{ key: string; value: string }>(
-    "SELECT key, value FROM settings",
-  );
+  const rows = await query<{ key: string; value: string }>("SELECT key, value FROM settings");
   const stored: Record<string, string> = {};
   for (const row of rows) stored[row.key] = row.value;
 

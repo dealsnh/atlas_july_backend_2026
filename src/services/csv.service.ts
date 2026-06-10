@@ -67,7 +67,9 @@ function escapeCsv(value: string | null | undefined): string {
   return str;
 }
 
-export function leadsToCsv(leads: Array<Record<string, string | number | null | undefined>>): string {
+export function leadsToCsv(
+  leads: Array<Record<string, string | number | null | undefined>>,
+): string {
   const rows = leads.map((lead) =>
     FIELDS.map((field) => escapeCsv(lead[field] as string | null | undefined)).join(","),
   );

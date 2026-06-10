@@ -72,4 +72,3 @@ export const enrichLeadsSchema = z.object({
   state: z.string().length(2).optional(),
   limit: z.coerce.number().int().positive().max(5000).optional(),
 });
-

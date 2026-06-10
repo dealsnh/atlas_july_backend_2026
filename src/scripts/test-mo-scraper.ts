@@ -15,10 +15,8 @@ async function test(): Promise<void> {
     if (items.length > 0) {
       const first = items[0] ?? "";
       const title =
-        (
-          first.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) ||
-          first.match(/<title>(.+?)<\/title>/)
-        )?.[1]?.trim() || "";
+        (first.match(/<title><!\[CDATA\[(.+?)\]\]><\/title>/) ||
+          first.match(/<title>(.+?)<\/title>/))?.[1]?.trim() || "";
       console.log("First title:", title);
     }
   } catch (e) {

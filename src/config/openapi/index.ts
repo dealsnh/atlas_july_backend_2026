@@ -54,7 +54,8 @@ export function buildOpenApiSpec(serverUrl?: string) {
           type: "http",
           scheme: "bearer",
           bearerFormat: "JWT",
-          description: "User JWT from login — also accepted on protected routes via `authMiddleware`",
+          description:
+            "User JWT from login — also accepted on protected routes via `authMiddleware`",
         },
       },
       schemas: openApiSchemas,
