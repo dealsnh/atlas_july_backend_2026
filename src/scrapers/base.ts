@@ -50,6 +50,15 @@ const SKIP_SCRAPER_PATTERNS = [
   "16thcircuit.org/", // Jackson MO delinquent land tax — direct ASP pages
   "hcauditor.org", // Hamilton OH auditor XLSX + wedge property search
   "madisontc.com", // Madison AL tax certificate XLSX
+  "sheriffclayco.org", // Clay MO sheriff property sales
+  "claycountymo.tax", // Clay MO collector tax sale
+  "plattecountycollector.com", // Platte MO collector
+  "plattesheriff.org", // Platte MO sheriff
+  "casscounty.com", // Cass MO
+  "rubinlublin.com", // AL statewide foreclosure listings (legacy)
+  "rlselaw.com", // Rubin Lublin AL property listings
+  "jeffcointouch.com", // Jefferson AL portal
+  "data.birminghamal.gov", // Jefferson vacant structures
   "services3.arcgis.com/", // Jackson MO ArcGIS
   "services.arcgis.com/", // AL county ArcGIS
   "arcgis/rest/services", // ArcGIS REST queries

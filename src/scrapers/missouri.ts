@@ -18,11 +18,85 @@
  */
 
 import * as cheerio from "cheerio";
+import { PDFParse } from "pdf-parse";
 import { filterLeadsByTypes, normalizeLeadTypes } from "../config/county-lead-types.js";
 import { Lead, makeId, formatDate, fetchWithRetry, fetchRendered, CountyConfig } from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
 
 const STATE = "MO";
+const OUTER_MO_COUNTIES = new Set(["clay", "platte", "cass"]);
+
+type TaxSalePdfRow = {
+  owner: string;
+  address: string;
+  city: string;
+  zip: string | null;
+  acct: string;
+  amount: string | null;
+};
+
+function parseTaxSalePdfLine(line: string): TaxSalePdfRow | null {
+  if (!/\$\s*[\d,]+/.test(line) || /Property Owner Name|Tax Sale #/i.test(line)) return null;
+  const parts = line
+    .split(/\t+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const dollarIdx = parts.findIndex((p) => p === "$");
+  if (dollarIdx < 5) return null;
+
+  const amount = parts[dollarIdx + 1] || null;
+  const cityStateZip = parts[dollarIdx - 2] || "";
+  const address = parts[dollarIdx - 3] || "";
+  const owner = parts[dollarIdx - 4] || "";
+  let acctIdx = dollarIdx - 5;
+  if (/^\d+(?:ST|ND|RD|TH)?$/i.test(parts[acctIdx])) acctIdx -= 1;
+  const acct = parts[acctIdx] || "";
+  if (!owner || owner.length < 2) return null;
+
+  const cityZip = cityStateZip.match(/^(.+?),\s*MO\s*(\d{5})/i);
+  return {
+    owner,
+    address,
+    city: cityZip?.[1]?.trim() || "Harrisonville",
+    zip: cityZip?.[2] || null,
+    acct,
+    amount,
+  };
+}
+
+async function fetchTaxSalePdfRows(pdfUrl: string): Promise<TaxSalePdfRow[]> {
+  const res = await fetchWithRetry(pdfUrl);
+  if (!res.ok) return [];
+  const buf = Buffer.from(await res.arrayBuffer());
+  const parser = new PDFParse({ data: buf });
+  try {
+    const result = await parser.getText();
+    const rows: TaxSalePdfRow[] = [];
+    for (const line of (result.text || "").split("\n")) {
+      const row = parseTaxSalePdfLine(line.trim());
+      if (row) rows.push(row);
+    }
+    return rows;
+  } finally {
+    await parser.destroy();
+  }
+}
+
+async function enrichAddressOwners(leads: Lead[], county: string): Promise<void> {
+  const CONCURRENCY = 10;
+  const needs = leads.filter((l) => !l.owner_name?.trim() && l.address?.trim());
+  for (let i = 0; i < needs.length; i += CONCURRENCY) {
+    const batch = needs.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(batch.map((l) => lookupByAddress(l.address!, county, STATE)));
+    for (let j = 0; j < batch.length; j++) {
+      const prop = results[j];
+      if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
+      if (prop?.address) batch[j].address = prop.address;
+      if (prop?.city) batch[j].city = prop.city;
+      if (prop?.zip) batch[j].zip = prop.zip;
+    }
+  }
+}
 
 // ─── JACKSON COUNTY Pre-Foreclosure via Recorder of Deeds ────────────────────
 async function scrapeJacksonPreForeclosure(fromDate: string, toDate: string): Promise<Lead[]> {
@@ -396,74 +470,100 @@ async function scrapeJacksonProbate(fromDate: string, toDate: string): Promise<L
   return leads;
 }
 
+function parseSheriffNoticeText(
+  noticeHtml: string,
+  county: string,
+  state: string,
+  sourceUrl: string,
+  fromDate: string,
+): Lead | null {
+  const text = cheerio.load(noticeHtml).text().replace(/\s+/g, " ").trim();
+  if (/CANCELLED/i.test(text)) return null;
+
+  const caseNum = text.match(/Case\s+No\.?\s*([\w-]+)/i)?.[1] || null;
+  const owner =
+    text.match(/vs\.?\s*([^,]+),\s*Defendant/i)?.[1]?.trim() ||
+    text.match(/Defendant[:\s]+([^,.]+)/i)?.[1]?.trim() ||
+    null;
+  const saleDateMatch = text.match(
+    /on\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+day of\s+(\w+),?\s+(\d{4})/i,
+  );
+  let saleDate: string | null = null;
+  if (saleDateMatch) {
+    const parsed = new Date(`${saleDateMatch[2]} ${saleDateMatch[1]}, ${saleDateMatch[3]}`);
+    if (!isNaN(parsed.getTime())) saleDate = formatDate(parsed.toISOString().slice(0, 10));
+  }
+  const address =
+    text.match(/described as[:\s]+(.+?)(?:\.|Situated in)/i)?.[1]?.trim() ||
+    text.match(/(Lot\s+\d+[^.]{5,80})/i)?.[1]?.trim() ||
+    text.match(/(\d+\s+[\w\s]+(?:Kansas City|Liberty)[^,]*,\s*MO\s*\d{5})/i)?.[1]?.trim() ||
+    null;
+
+  if (!caseNum && !owner && !address) return null;
+
+  const city = /Kansas City/i.test(text) ? "Kansas City" : "Liberty";
+  return {
+    id: makeId(county, state, "Sheriff Sale", caseNum || owner || address || text.slice(0, 40)),
+    county,
+    state,
+    lead_type: "Sheriff Sale",
+    owner_name: owner,
+    address,
+    city,
+    zip: address?.match(/\b(\d{5})\b/)?.[1] || null,
+    mailing_address: null,
+    mailing_city: null,
+    mailing_state: null,
+    mailing_zip: null,
+    case_number: caseNum,
+    filing_date: formatDate(fromDate),
+    assessed_value: null,
+    tax_year: null,
+    lender: null,
+    loan_amount: null,
+    sale_date: saleDate,
+    sale_amount: null,
+    description: `${county} County ${state} Sheriff Sale — ${owner || caseNum || address}`,
+    source_url: sourceUrl,
+    raw_data: JSON.stringify({ caseNum, owner, address, saleDate }),
+  };
+}
+
 // ─── CLAY COUNTY ─────────────────────────────────────────────────────────────
 async function scrapeClayCounty(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
   const COUNTY = "Clay";
   try {
-    // Clay County Sheriff civil process sales
-    const sheriffUrl = `https://www.claycountymo.gov/sheriff/civil-process`;
-    const res = await fetchWithRetry(sheriffUrl);
-    if (res.ok) {
-      const html = await res.text();
-      const $ = cheerio.load(html);
-
-      $("table tr").each((_, row) => {
-        const cells = $(row).find("td");
-        if (cells.length < 2) return;
-        const caseNum = $(cells[0]).text().trim();
-        const address = $(cells[1]).text().trim();
-        const saleDate = $(cells[2])?.text().trim();
-
-        if (!caseNum || caseNum === "Case") return;
-
-        leads.push({
-          id: makeId(COUNTY, STATE, "Sheriff Sale", caseNum),
-          county: COUNTY,
-          state: STATE,
-          lead_type: "Sheriff Sale",
-          owner_name: null,
-          address: address || null,
-          city: "Liberty",
-          zip: null,
-          mailing_address: null,
-          mailing_city: null,
-          mailing_state: null,
-          mailing_zip: null,
-          case_number: caseNum,
-          filing_date: formatDate(fromDate),
-          assessed_value: null,
-          tax_year: null,
-          lender: null,
-          loan_amount: null,
-          sale_date: formatDate(saleDate),
-          sale_amount: null,
-          description: `Clay County Sheriff Sale — ${caseNum}`,
-          source_url: sheriffUrl,
-          raw_data: JSON.stringify({ caseNum, address, saleDate }),
-        });
-      });
+    const sheriffUrl = "https://www.sheriffclayco.org/community-resources/sheriffs-property-sales/";
+    let res = await fetchWithRetry(sheriffUrl);
+    let html = res.ok ? await res.text() : "";
+    if (!/Notice of Sheriff/i.test(html)) {
+      const rendered = await fetchRendered(sheriffUrl);
+      if (rendered.ok) html = await rendered.text();
     }
 
-    // Clay County Collector tax delinquent
-    const taxUrl = `https://www.claycountymo.gov/collector/delinquent-taxes`;
+    for (const chunk of html.split(/Notice of Sheriff'?s? Sale/i).slice(1)) {
+      const lead = parseSheriffNoticeText(chunk, COUNTY, STATE, sheriffUrl, fromDate);
+      if (lead) leads.push(lead);
+    }
+
+    const taxUrl = "https://claycountymo.tax/tax-sale/";
     const taxRes = await fetchWithRetry(taxUrl);
     if (taxRes.ok) {
-      const html = await taxRes.text();
-      const $ = cheerio.load(html);
-
-      $("a[href*='.pdf'], a[href*='delinquent']").each((_, el) => {
+      const taxHtml = await taxRes.text();
+      const $ = cheerio.load(taxHtml);
+      $("a[href*='.pdf'], a[href*='sold'], a[href*='list']").each((_, el) => {
         const href = $(el).attr("href");
         const text = $(el).text().trim();
-        if (!href) return;
+        if (!href || !/tax|sold|list|delinquent/i.test(text + href)) return;
         leads.push({
           id: makeId(COUNTY, STATE, "Tax Delinquent", href),
           county: COUNTY,
           state: STATE,
           lead_type: "Tax Delinquent",
-          owner_name: null,
+          owner_name: `Clay County Tax Sale ${text}`.slice(0, 80),
           address: null,
-          city: null,
+          city: "Liberty",
           zip: null,
           mailing_address: null,
           mailing_city: null,
@@ -478,14 +578,15 @@ async function scrapeClayCounty(fromDate: string, toDate: string): Promise<Lead[
           sale_date: null,
           sale_amount: null,
           description: `Clay County Tax Delinquent — ${text}`,
-          source_url: href.startsWith("http") ? href : `https://www.claycountymo.gov${href}`,
-          raw_data: JSON.stringify({ text }),
+          source_url: href.startsWith("http") ? href : `https://claycountymo.tax${href}`,
+          raw_data: JSON.stringify({ text, href }),
         });
       });
     }
   } catch (e) {
     console.error(`[Clay MO] error:`, e);
   }
+  await enrichAddressOwners(leads, COUNTY);
   return leads;
 }
 
@@ -494,51 +595,115 @@ async function scrapePlatteCounty(fromDate: string, toDate: string): Promise<Lea
   const leads: Lead[] = [];
   const COUNTY = "Platte";
   try {
-    const url = `https://www.plattecountymo.gov/departments/sheriff/civil-process-sales`;
-    const res = await fetchWithRetry(url);
-    if (!res.ok) return leads;
+    const sheriffUrl = "https://www.plattesheriff.org/community-resources/sheriffs-property-sales/";
+    let res = await fetchWithRetry(sheriffUrl);
+    let html = res.ok ? await res.text() : "";
+    if (!/Notice of Sheriff/i.test(html)) {
+      const rendered = await fetchRendered(sheriffUrl);
+      if (rendered.ok) html = await rendered.text();
+    }
+    for (const chunk of html.split(/Notice of Sheriff'?s? Sale/i).slice(1)) {
+      const lead = parseSheriffNoticeText(chunk, COUNTY, STATE, sheriffUrl, fromDate);
+      if (lead) {
+        lead.city = lead.city || "Platte City";
+        leads.push(lead);
+      }
+    }
 
-    const html = await res.text();
-    const $ = cheerio.load(html);
+    try {
+      const taxUrl = "https://plattecountycollector.com/taxsale6.php";
+      let taxRes = await fetchWithRetry(taxUrl).catch(() => null);
+      if (!taxRes?.ok) taxRes = await fetchRendered(taxUrl).catch(() => null);
+      if (taxRes?.ok) {
+        const html = await taxRes.text();
+        if (html.trim().length > 100) {
+          const $ = cheerio.load(html);
+          $("table tr").each((_, row) => {
+            const cells = $(row)
+              .find("td")
+              .map((__, td) => $(td).text().trim())
+              .get();
+            if (cells.length < 2) return;
+            const owner = cells[0];
+            const address = cells[1] || cells[2];
+            if (!owner || owner.length < 2 || /owner|name|parcel/i.test(owner)) return;
+            leads.push({
+              id: makeId(COUNTY, STATE, "Tax Delinquent", `${owner}-${address}`),
+              county: COUNTY,
+              state: STATE,
+              lead_type: "Tax Delinquent",
+              owner_name: owner,
+              address: address || null,
+              city: "Platte City",
+              zip: null,
+              mailing_address: null,
+              mailing_city: null,
+              mailing_state: null,
+              mailing_zip: null,
+              case_number: cells[2] || null,
+              filing_date: formatDate(fromDate),
+              assessed_value: null,
+              tax_year: new Date().getFullYear().toString(),
+              lender: null,
+              loan_amount: null,
+              sale_date: null,
+              sale_amount: null,
+              description: `Platte County Tax Delinquent — ${owner}`,
+              source_url: taxUrl,
+              raw_data: JSON.stringify(cells),
+            });
+          });
+        }
+      }
+    } catch {
+      /* Platte collector TLS/page may be unavailable — sheriff + FSBO still run */
+    }
 
-    $("table tr, .sale-item").each((_, el) => {
-      const cells = $(el).find("td");
-      if (cells.length < 2) return;
-      const caseNum = $(cells[0]).text().trim();
-      const address = $(cells[1]).text().trim();
-      const saleDate = $(cells[2])?.text().trim();
-
-      if (!caseNum || caseNum === "Case") return;
-
-      leads.push({
-        id: makeId(COUNTY, STATE, "Sheriff Sale", caseNum),
-        county: COUNTY,
-        state: STATE,
-        lead_type: "Sheriff Sale",
-        owner_name: null,
-        address: address || null,
-        city: "Platte City",
-        zip: null,
-        mailing_address: null,
-        mailing_city: null,
-        mailing_state: null,
-        mailing_zip: null,
-        case_number: caseNum,
-        filing_date: formatDate(fromDate),
-        assessed_value: null,
-        tax_year: null,
-        lender: null,
-        loan_amount: null,
-        sale_date: formatDate(saleDate),
-        sale_amount: null,
-        description: `Platte County Sheriff Sale — ${caseNum}`,
-        source_url: url,
-        raw_data: JSON.stringify({ caseNum, address, saleDate }),
+    const fsboUrl = "https://kansascity.craigslist.org/search/rea?query=platte&purveyor=owner";
+    const fsboRes = await fetchWithRetry(fsboUrl);
+    if (fsboRes.ok) {
+      const $ = cheerio.load(await fsboRes.text());
+      $("li.cl-static-search-result, li.result-row, .cl-search-result").each((_, el) => {
+        const title = $(el)
+          .find(".title, .result-title, a.posting-title, .title-blob")
+          .first()
+          .text()
+          .trim();
+        const price = $(el).find(".price, .result-price, .priceinfo").first().text().trim();
+        const date = $(el).find("time").attr("datetime") || "";
+        const link = $(el).find("a").first().attr("href") || "";
+        if (!title) return;
+        leads.push({
+          id: makeId(COUNTY, STATE, "FSBO", link || title),
+          county: COUNTY,
+          state: STATE,
+          lead_type: "FSBO",
+          owner_name: "FSBO Seller",
+          address: title,
+          city: "Platte City",
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
+          case_number: null,
+          filing_date: formatDate(date || fromDate),
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: price.replace(/[^\d.]/g, "") || null,
+          description: title,
+          source_url: link.startsWith("http") ? link : `https://kansascity.craigslist.org${link}`,
+          raw_data: JSON.stringify({ title, price }),
+        });
       });
-    });
+    }
   } catch (e) {
     console.error(`[Platte MO] error:`, e);
   }
+  await enrichAddressOwners(leads, COUNTY);
   return leads;
 }
 
@@ -546,52 +711,40 @@ async function scrapePlatteCounty(fromDate: string, toDate: string): Promise<Lea
 async function scrapeCassCounty(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
   const COUNTY = "Cass";
+  const taxPdfUrl = "https://www.casscounty.com/DocumentCenter/View/3889/2024-TAX-SALE-LIST";
   try {
-    const url = `https://www.casscounty.com/sheriff/civil-process`;
-    const res = await fetchWithRetry(url);
-    if (!res.ok) return leads;
-
-    const html = await res.text();
-    const $ = cheerio.load(html);
-
-    $("table tr").each((_, row) => {
-      const cells = $(row).find("td");
-      if (cells.length < 2) return;
-      const caseNum = $(cells[0]).text().trim();
-      const address = $(cells[1]).text().trim();
-      const saleDate = $(cells[2])?.text().trim();
-
-      if (!caseNum || caseNum === "Case") return;
-
+    const rows = await fetchTaxSalePdfRows(taxPdfUrl);
+    for (const row of rows) {
       leads.push({
-        id: makeId(COUNTY, STATE, "Sheriff Sale", caseNum),
+        id: makeId(COUNTY, STATE, "Tax Delinquent", `${row.acct}-${row.owner}`),
         county: COUNTY,
         state: STATE,
-        lead_type: "Sheriff Sale",
-        owner_name: null,
-        address: address || null,
-        city: "Harrisonville",
-        zip: null,
+        lead_type: "Tax Delinquent",
+        owner_name: row.owner,
+        address: row.address || null,
+        city: row.city,
+        zip: row.zip,
         mailing_address: null,
         mailing_city: null,
         mailing_state: null,
         mailing_zip: null,
-        case_number: caseNum,
+        case_number: row.acct || null,
         filing_date: formatDate(fromDate),
         assessed_value: null,
-        tax_year: null,
+        tax_year: new Date().getFullYear().toString(),
         lender: null,
         loan_amount: null,
-        sale_date: formatDate(saleDate),
-        sale_amount: null,
-        description: `Cass County Sheriff Sale — ${caseNum}`,
-        source_url: url,
-        raw_data: JSON.stringify({ caseNum, address, saleDate }),
+        sale_date: null,
+        sale_amount: row.amount,
+        description: `Cass County Tax Delinquent — ${row.owner}`,
+        source_url: taxPdfUrl,
+        raw_data: JSON.stringify(row),
       });
-    });
+    }
   } catch (e) {
     console.error(`[Cass MO] error:`, e);
   }
+  await enrichAddressOwners(leads, COUNTY);
   return leads;
 }
 
@@ -693,7 +846,15 @@ async function scrapeKCCraigslistFSBO(fromDate: string, toDate: string): Promise
       let county = "Jackson";
       if (locLower.includes("liberty") || locLower.includes("kearney") || locLower.includes("clay"))
         county = "Clay";
-      else if (locLower.includes("platte") || locLower.includes("parkville")) county = "Platte";
+      else if (
+        locLower.includes("platte") ||
+        locLower.includes("parkville") ||
+        locLower.includes("camden") ||
+        locLower.includes("weston") ||
+        locLower.includes("dearborn") ||
+        locLower.includes("smithville")
+      )
+        county = "Platte";
       else if (
         locLower.includes("cass") ||
         locLower.includes("harrisonville") ||
@@ -706,8 +867,8 @@ async function scrapeKCCraigslistFSBO(fromDate: string, toDate: string): Promise
         county,
         state: STATE,
         lead_type: "FSBO",
-        owner_name: null,
-        address: location || null,
+        owner_name: "FSBO Seller",
+        address: title || location || null,
         city: location || null,
         zip: null,
         mailing_address: null,
@@ -1438,7 +1599,7 @@ export async function scrapeCounty(
     cass: () => scrapeCassCounty(fromDate, toDate),
   };
 
-  const runners: Record<string, () => Promise<Lead[]>> = {
+  const jacksonRunners: Record<string, () => Promise<Lead[]>> = {
     "Lis Pendens": () => scrapeLisPendens(fromDate, toDate),
     "Water Shutoff": () => scrapeMOWaterShutoffs(fromDate, toDate),
     "Fire Damage": () => scrapeMOFireDamage(fromDate, toDate),
@@ -1454,7 +1615,19 @@ export async function scrapeCounty(
     Obituary: () => scrapeMOObituaries(fromDate, toDate),
   };
 
-  const types = leadTypes?.length ? normalizeLeadTypes(leadTypes) : Object.keys(runners);
+  const outerRunners: Record<string, () => Promise<Lead[]>> = {
+    "Lis Pendens": () => scrapeLisPendens(fromDate, toDate),
+    "Pre-Foreclosure": () => scrapeLisPendens(fromDate, toDate),
+    Probate: () => scrapeMOProbate(fromDate, toDate),
+    Bankruptcy: () => scrapeBankruptcy(fromDate, toDate),
+    FSBO: () => scrapeKCCraigslistFSBO(fromDate, toDate),
+  };
+
+  const types = leadTypes?.length
+    ? normalizeLeadTypes(leadTypes)
+    : norm === "jackson"
+      ? Object.keys(jacksonRunners)
+      : [...Object.keys(outerRunners), "Sheriff Sale", "Tax Delinquent"];
   const wants = (type: string) => types.includes(type);
   const fns: Array<() => Promise<Lead[]>> = [];
 
@@ -1465,6 +1638,8 @@ export async function scrapeCounty(
     fns.push(countyBulk[norm]);
   }
 
+  const runners =
+    norm === "jackson" ? jacksonRunners : OUTER_MO_COUNTIES.has(norm) ? outerRunners : {};
   for (const [type, fn] of Object.entries(runners)) {
     if (wants(type)) fns.push(fn);
   }
