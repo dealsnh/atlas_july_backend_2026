@@ -15,7 +15,8 @@ export async function getSettings(): Promise<AppSettings> {
     smtp_from: stored.smtp_from ?? env.SMTP_FROM ?? "",
     email_recipients: stored.email_recipients ?? env.CLIENT_EMAIL ?? "",
     scraper_api_key: stored.scraper_api_key ?? env.SCRAPER_API_KEY ?? "",
-    skip_trace_key: stored.skip_trace_key ?? env.SKIP_TRACE_KEY ?? "",
+    // Railway/env key wins when set — avoids stale DB key blocking Tracerfy deploys
+    skip_trace_key: env.SKIP_TRACE_KEY || stored.skip_trace_key || "",
     auto_skip_trace: stored.auto_skip_trace ?? "false",
     bright_data_user: stored.bright_data_user ?? env.BRIGHT_DATA_USER ?? "",
     bright_data_pass: stored.bright_data_pass ?? env.BRIGHT_DATA_PASS ?? "",

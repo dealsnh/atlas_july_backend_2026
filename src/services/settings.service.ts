@@ -1,4 +1,5 @@
 import { clientConfig } from "../config/constants.js";
+import { env } from "../config/env.js";
 import { getSettings, saveSettings } from "../repositories/settings.repository.js";
 import type { AppSettings } from "../types/settings.js";
 import { SECRET_MASK, SETTINGS_KEYS } from "../types/settings.js";
@@ -11,6 +12,8 @@ export async function syncRuntimeConfig(): Promise<void> {
   if (settings.bright_data_pass) process.env.BRIGHT_DATA_PASS = settings.bright_data_pass;
   if (settings.attom_api_key) process.env.ATTOM_API_KEY = settings.attom_api_key;
   if (settings.skip_trace_key) process.env.SKIP_TRACE_KEY = settings.skip_trace_key;
+  if (env.SKIP_TRACE_API_URL) process.env.SKIP_TRACE_API_URL = env.SKIP_TRACE_API_URL;
+  if (env.SKIP_TRACE_PROVIDER) process.env.SKIP_TRACE_PROVIDER = env.SKIP_TRACE_PROVIDER;
   logger.debug("Runtime scraper config synced from settings");
 }
 
