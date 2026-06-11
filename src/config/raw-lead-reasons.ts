@@ -1,5 +1,5 @@
 import type { Lead as ScraperLead } from "../scrapers/base.js";
-import { isLeadSaveable } from "../services/enrichment.service.js";
+import { isLeadSaveable, isValidStreetAddress } from "../services/enrichment.service.js";
 import { isPlaceholderOwner } from "../services/owner-placeholders.js";
 
 /** Why a scraped row did not become a portal lead. */
@@ -24,6 +24,10 @@ export function resolveRejectReason(lead: ScraperLead): string {
 
   if ((!addr || addr.length < 5) && (!name || name.length < 2)) {
     return RAW_REJECT_REASON.MISSING_ADDRESS_AND_OWNER;
+  }
+
+  if (!isValidStreetAddress(lead.address) && name.length >= 2) {
+    return RAW_REJECT_REASON.NO_OWNER_AFTER_ENRICHMENT;
   }
 
   if (!isLeadSaveable(lead)) return RAW_REJECT_REASON.NO_OWNER_AFTER_ENRICHMENT;

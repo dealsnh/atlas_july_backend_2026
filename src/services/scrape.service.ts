@@ -118,7 +118,7 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
       lastScrapeLog.push(`✓ ${batchNew} leads saved to DB (${totalNew} total)`);
     }
     if (batchSkipped > 0) {
-      lastScrapeLog.push(`⚠ Skipped ${batchSkipped} leads — no real owner after enrichment`);
+      lastScrapeLog.push(`⚠ Skipped ${batchSkipped} leads — incomplete after enrichment`);
     }
   };
 

@@ -23,13 +23,29 @@ export function isPlaceholderOwner(name: string | null | undefined): boolean {
 export function extractAddressFromListing(text: string | null | undefined): string | null {
   if (!text?.trim()) return null;
   const t = text.trim();
-  const street = t.match(
-    /\b(\d+\s+(?:[NSEW]\.?\s+)?[A-Za-z0-9][\w\s.'-]{2,60}(?:\b(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Ln|Lane|Blvd|Ct|Court|Way|Pl|Place|Cir|Circle|Ter|Terrace|Hwy|Highway)\.?)\b)/i,
+
+  const withSuffix = [
+    ...t.matchAll(
+      /\b(\d{1,5}\s+(?!(?:Acres?|unit|sq)\b)(?:[NSEW]\.?\s+)?(?:[\w.'-]+\s+){0,8}(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Ln|Lane|Blvd|Ct|Court|Way|Pl|Place|Cir|Circle|Ter|Terrace|Hwy|Highway|Pkwy|Parkway)\.?)\b/gi,
+    ),
+  ];
+  if (withSuffix.length) {
+    const matches = withSuffix
+      .map((m) => m[1]!.trim())
+      .filter((m) => m.length >= 6 && m.length <= 80);
+    if (matches.length) return matches[matches.length - 1]!;
+  }
+
+  // "6915 Mountain View Dr" embedded in marketing copy without always matching above
+  const embedded = t.match(
+    /\b(\d+\s+(?:[NSEW]\.?\s+)?[A-Za-z][\w\s.'-]{2,40}\s+(?:Dr|Drive|St|Street|Rd|Road|Ave|Avenue|Ln|Lane|Blvd|Way|Ct|Court)\.?)\b/i,
   )?.[1];
-  if (street && street.length >= 6) return street.trim();
+  if (embedded && embedded.length >= 8) return embedded.trim();
+
   if (/^\d+\s+[A-Za-z]/.test(t) && t.length <= 120) {
     const part = t.split(/[,|]/)[0]?.trim();
-    return part && part.length >= 5 ? part : null;
+    if (part && part.length >= 5 && part.length <= 80) return part;
   }
+
   return null;
 }

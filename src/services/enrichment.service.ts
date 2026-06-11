@@ -42,12 +42,32 @@ function dbLeadToScraperLead(row: DbLead): Lead {
 
 const CONCURRENCY = 5;
 
+/** Valid situs street line — rejects Craigslist marketing copy used as address. */
+export function isValidStreetAddress(address: string | null | undefined): boolean {
+  const a = (address || "").trim();
+  if (a.length < 5 || a.length > 120) return false;
+  if (!/^\d+/.test(a)) return false;
+  if (a.split(/\s+/).length > 14) return false;
+  if (/^\d+\s+unit\b/i.test(a)) return false;
+  if (/^\d+\s+acres?\b/i.test(a)) return false;
+  const hasStreetSuffix =
+    /\b(St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Ln|Lane|Blvd|Ct|Court|Way|Pl|Place|Cir|Hwy|Pkwy)\.?$/i.test(
+      a,
+    );
+  if (!hasStreetSuffix && a.split(/\s+/).length > 6) return false;
+  return true;
+}
+
+function hasMailingAddress(lead: Lead): boolean {
+  return (lead.mailing_address || "").trim().length >= 5;
+}
+
 function addressVariants(addr: string): string[] {
   const base = addr.trim();
   const out = new Set<string>([base]);
   const noCity = base
     .replace(
-      /\s+(Kansas City|KC|Cincinnati|Birmingham|Huntsville|Liberty|Platte City|Harrisonville)\b.*$/i,
+      /\s+(Kansas City|KC|Cincinnati|Birmingham|Huntsville|Liberty|Platte City|Harrisonville|Pinson|Madison|Decatur|Moulton)\b.*$/i,
       "",
     )
     .trim();
@@ -61,30 +81,59 @@ function addressVariants(addr: string): string[] {
 
 function needsEnrichment(lead: Lead): boolean {
   const missingOwner = isPlaceholderOwner(lead.owner_name);
-  const missingAddress = !lead.address?.trim() || lead.address.startsWith("[");
-  const missingMailing = !lead.mailing_address?.trim();
+  const missingAddress = !isValidStreetAddress(lead.address);
+  const missingMailing = !hasMailingAddress(lead);
   return missingOwner || missingAddress || missingMailing;
 }
 
-/** Client requirement: saved leads must have a real assessor-verified owner name. */
+/** Client requirement: owner name + property address + mailing (situs OK when assessor has no mail). */
 export function isLeadSaveable(lead: Lead): boolean {
   const name = (lead.owner_name || "").trim();
   if (name.length < 2) return false;
   if (isPlaceholderOwner(name)) return false;
+  if (!isValidStreetAddress(lead.address)) return false;
+  if (!hasMailingAddress(lead)) return false;
   return true;
 }
 
 function applyAssessorMatch(lead: Lead, match: AssessorProperty, state: string): Lead {
+  const situsAddress = match.address || lead.address;
+  const situsCity = match.city || lead.city;
+  const situsZip = match.zip || lead.zip;
+  const mailAddr = match.mailingAddress?.trim();
+  const useAssessorMail = mailAddr && mailAddr.length >= 5;
+
   return {
     ...lead,
     owner_name: match.ownerName || lead.owner_name,
-    address: match.address || lead.address,
-    city: match.city || lead.city,
-    zip: match.zip || lead.zip,
-    mailing_address: lead.mailing_address || match.address,
-    mailing_city: lead.mailing_city || match.city,
+    address: situsAddress,
+    city: situsCity,
+    zip: situsZip,
+    mailing_address: useAssessorMail
+      ? mailAddr
+      : lead.mailing_address || situsAddress || null,
+    mailing_city: useAssessorMail
+      ? match.mailingCity || lead.mailing_city || situsCity
+      : lead.mailing_city || situsCity,
+    mailing_state: useAssessorMail
+      ? match.mailingState || lead.mailing_state || state
+      : lead.mailing_state || state,
+    mailing_zip: useAssessorMail
+      ? match.mailingZip || lead.mailing_zip || situsZip || null
+      : lead.mailing_zip || situsZip || null,
+  };
+}
+
+/** When assessor returns situs only, copy to mailing so the lead is complete. */
+function ensureMailingFromSitus(lead: Lead, state: string): Lead {
+  if (hasMailingAddress(lead)) return lead;
+  if (!isValidStreetAddress(lead.address)) return lead;
+  return {
+    ...lead,
+    mailing_address: lead.address,
+    mailing_city: lead.mailing_city || lead.city,
     mailing_state: lead.mailing_state || state,
-    mailing_zip: lead.mailing_zip || match.zip || null,
+    mailing_zip: lead.mailing_zip || lead.zip || null,
   };
 }
 
@@ -101,12 +150,29 @@ async function lookupByAddressVariants(
 }
 
 function resolveLookupAddress(lead: Lead): string | null {
-  const addr = lead.address?.trim();
-  if (addr && !addr.startsWith("[") && addr.length >= 5) {
-    const fromListing = extractAddressFromListing(addr);
-    return fromListing || addr;
+  const candidates: string[] = [];
+
+  if (lead.address?.trim()) candidates.push(lead.address.trim());
+  if (lead.description?.trim()) candidates.push(lead.description.trim());
+
+  if (lead.raw_data) {
+    try {
+      const raw = JSON.parse(lead.raw_data) as Record<string, string>;
+      if (raw.detailAddress?.trim()) candidates.push(raw.detailAddress.trim());
+      if (raw.title?.trim()) candidates.push(raw.title.trim());
+      if (raw.location?.trim()) candidates.push(raw.location.trim());
+    } catch {
+      /* ignore */
+    }
   }
-  return extractAddressFromListing(lead.description) || extractAddressFromListing(lead.address);
+
+  for (const text of candidates) {
+    const extracted = extractAddressFromListing(text);
+    if (extracted) return extracted;
+    if (isValidStreetAddress(text)) return text;
+  }
+
+  return null;
 }
 
 async function enrichOne(lead: Lead): Promise<Lead> {
@@ -125,12 +191,15 @@ async function enrichOne(lead: Lead): Promise<Lead> {
       if (match) current = applyAssessorMatch(current, match, state);
     }
 
-    const stillMissingOwner = isPlaceholderOwner(current.owner_name);
-    const stillMissingAddress =
-      !current.address?.trim() || current.address.startsWith("[") || !/\d/.test(current.address);
+    const stillMissingOwner =
+      !current.owner_name?.trim() || isPlaceholderOwner(current.owner_name);
+    const stillMissingAddress = !isValidStreetAddress(current.address);
+    const stillMissingMailing = !hasMailingAddress(current);
+    const hasRealOwner =
+      !!current.owner_name?.trim() && !isPlaceholderOwner(current.owner_name);
 
-    if (stillMissingOwner && current.owner_name?.trim()) {
-      const properties = await lookupOwnerProperties(current.owner_name, county, state);
+    if (hasRealOwner && (stillMissingAddress || stillMissingMailing)) {
+      const properties = await lookupOwnerProperties(current.owner_name!, county, state);
       const first = properties[0];
       if (first) current = applyAssessorMatch(current, first, state);
     } else if (stillMissingOwner || stillMissingAddress) {
@@ -149,7 +218,7 @@ async function enrichOne(lead: Lead): Promise<Lead> {
     current.owner_name = null;
   }
 
-  return current;
+  return ensureMailingFromSitus(current, state);
 }
 
 /** County assessor enrichment — runs on every lead in the batch (FSBO included). */
@@ -170,9 +239,11 @@ export async function enrichLeads(
 
   const saveable = results.filter(isLeadSaveable).length;
   const skipped = leads.length - saveable;
-  onProgress?.(`✓ Assessor enriched ${leads.length} leads (${saveable} saveable with real owner)`);
+  onProgress?.(
+    `✓ Assessor enriched ${leads.length} leads (${saveable} complete with owner+address+mailing)`,
+  );
   if (skipped > 0) {
-    onProgress?.(`⚠ ${skipped} leads lack assessor owner after enrichment`);
+    onProgress?.(`⚠ ${skipped} leads incomplete after assessor enrichment`);
   }
 
   return results;
@@ -183,11 +254,21 @@ export async function enrichExistingLeads(opts: {
   county?: string;
   state?: string;
   limit?: number;
-}): Promise<{ processed: number; updated: number; stillMissingOwner: number }> {
+}): Promise<{
+  processed: number;
+  updated: number;
+  stillIncomplete: number;
+  stillMissingOwner: number;
+  stillMissingAddress: number;
+  stillMissingMailing: number;
+}> {
   const limit = Math.min(opts.limit ?? 500, 5000);
   const rows = await findLeadsNeedingEnrichment({ ...opts, limit });
   let updated = 0;
+  let stillIncomplete = 0;
   let stillMissingOwner = 0;
+  let stillMissingAddress = 0;
+  let stillMissingMailing = 0;
 
   for (let i = 0; i < rows.length; i += CONCURRENCY) {
     const batch = rows.slice(i, i + CONCURRENCY);
@@ -195,22 +276,40 @@ export async function enrichExistingLeads(opts: {
     for (let j = 0; j < batch.length; j++) {
       const before = batch[j]!;
       const after = results[j]!;
-      if (!after || !isLeadSaveable(after)) {
-        stillMissingOwner++;
-        continue;
-      }
+
       const changed =
         after.owner_name !== before.owner_name ||
         after.address !== before.address ||
-        after.mailing_address !== before.mailing_address;
+        after.city !== before.city ||
+        after.zip !== before.zip ||
+        after.mailing_address !== before.mailing_address ||
+        after.mailing_city !== before.mailing_city ||
+        after.mailing_state !== before.mailing_state ||
+        after.mailing_zip !== before.mailing_zip;
+
       if (changed) {
         await updateLeadEnrichment(after.id, after);
         updated++;
       }
+
+      if (!isLeadSaveable(after)) {
+        stillIncomplete++;
+        const name = (after.owner_name || "").trim();
+        if (name.length < 2 || isPlaceholderOwner(name)) stillMissingOwner++;
+        if (!isValidStreetAddress(after.address)) stillMissingAddress++;
+        if (!hasMailingAddress(after)) stillMissingMailing++;
+      }
     }
   }
 
-  return { processed: rows.length, updated, stillMissingOwner };
+  return {
+    processed: rows.length,
+    updated,
+    stillIncomplete,
+    stillMissingOwner,
+    stillMissingAddress,
+    stillMissingMailing,
+  };
 }
 
 export { countLeadsNeedingEnrichment, isPlaceholderOwner, needsEnrichment };

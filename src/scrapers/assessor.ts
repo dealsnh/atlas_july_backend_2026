@@ -20,6 +20,10 @@ export interface AssessorProperty {
   zip?: string;
   parcelId?: string;
   ownerName?: string;
+  mailingAddress?: string;
+  mailingCity?: string;
+  mailingState?: string;
+  mailingZip?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,7 +96,9 @@ function buildAddressLikePatterns(address: string): string[] {
 
 function mapJacksonMarketFeature(attrs: Record<string, string>): AssessorProperty | null {
   const address = attrs.situs_address?.trim();
-  const ownerName = attrs.owner_info?.split("|")[0]?.trim();
+  const ownerParts = (attrs.owner_info || "").split("|").map((s) => s.trim());
+  const ownerName = ownerParts[0];
+  const mailCandidate = ownerParts.find((p, i) => i > 0 && /^\d+\s+[A-Za-z]/.test(p));
   if (!address || !ownerName) return null;
   return {
     address,
@@ -101,6 +107,7 @@ function mapJacksonMarketFeature(attrs: Record<string, string>): AssessorPropert
     zip: attrs.situs_zip?.trim() || undefined,
     parcelId: attrs.parcel_number?.trim() || undefined,
     ownerName,
+    mailingAddress: mailCandidate || undefined,
   };
 }
 
@@ -428,18 +435,28 @@ async function lookupJeffersonAL(ownerName: string): Promise<AssessorProperty[]>
     const data = (await res.json()) as { features?: { attributes: Record<string, string> }[] };
     const features = data.features || [];
     return features
-      .map((f) => ({
-        address: f.attributes.SITUS_ADDR || "",
-        city: f.attributes.SITUS_CITY || "Birmingham",
-        state: "AL",
-        zip: f.attributes.SITUS_ZIP || undefined,
-        parcelId: f.attributes.PARCELID || undefined,
-        ownerName: f.attributes.OWNER1 || undefined,
-      }))
-      .filter((p) => p.address && /\d+\s+[A-Za-z]/.test(p.address));
+      .map((f) => mapJccalParcel(f.attributes))
+      .filter((p): p is AssessorProperty => !!p && /\d+\s+[A-Za-z]/.test(p.address));
   } catch {
     return [];
   }
+}
+
+function mapJccalParcel(attrs: Record<string, string>): AssessorProperty | null {
+  const address = attrs.SITUS_ADDR?.trim();
+  if (!address) return null;
+  return {
+    address,
+    city: attrs.SITUS_CITY || "Birmingham",
+    state: "AL",
+    zip: attrs.SITUS_ZIP || undefined,
+    parcelId: attrs.PARCELID || undefined,
+    ownerName: attrs.OWNER1 || undefined,
+    mailingAddress: attrs.MAIL_ADDR1?.trim() || undefined,
+    mailingCity: attrs.MAIL_CITY?.trim() || undefined,
+    mailingState: attrs.MAIL_STATE?.trim() || "AL",
+    mailingZip: attrs.MAIL_ZIP?.trim() || undefined,
+  };
 }
 
 async function lookupShelbyAL(ownerName: string): Promise<AssessorProperty[]> {
@@ -921,7 +938,10 @@ export async function lookupByAddress(
         "https://services3.arcgis.com/4LOAHoFXfea6Y3Et/ArcGIS/rest/services/ParcelViewer_Parcels_View/FeatureServer/0/query";
       const qUrl = new URL(parcelsUrl);
       qUrl.searchParams.set("where", `UPPER(SITUS_ADDR) LIKE '${streetNum} ${streetName}%'`);
-      qUrl.searchParams.set("outFields", "PARCELID,OWNER_NAME,SITUS_ADDR,SITUS_CITY,SITUS_ZIP");
+      qUrl.searchParams.set(
+        "outFields",
+        "PARCELID,OWNER_NAME,SITUS_ADDR,SITUS_CITY,SITUS_ZIP,MAIL_ADDR,MAIL_ADDR1,MAIL_CITY,MAIL_STATE,MAIL_ZIP",
+      );
       qUrl.searchParams.set("returnGeometry", "false");
       qUrl.searchParams.set("f", "json");
       qUrl.searchParams.set("resultRecordCount", "1");
@@ -937,6 +957,10 @@ export async function lookupByAddress(
             zip: f.SITUS_ZIP || undefined,
             parcelId: f.PARCELID || undefined,
             ownerName: f.OWNER_NAME || undefined,
+            mailingAddress: f.MAIL_ADDR || f.MAIL_ADDR1 || undefined,
+            mailingCity: f.MAIL_CITY || undefined,
+            mailingState: f.MAIL_STATE || "MO",
+            mailingZip: f.MAIL_ZIP || undefined,
           };
         }
       }
@@ -955,7 +979,10 @@ export async function lookupByAddress(
           "https://gis.jccal.org/arcgis/rest/services/ParcelViewer/ParcelViewer_Parcels_View/FeatureServer/0/query",
         );
         qUrl.searchParams.set("where", `UPPER(SITUS_ADDR) LIKE '${streetNum} ${streetName}%'`);
-        qUrl.searchParams.set("outFields", "PARCELID,OWNER1,SITUS_ADDR,SITUS_CITY,SITUS_ZIP");
+        qUrl.searchParams.set(
+          "outFields",
+          "PARCELID,OWNER1,SITUS_ADDR,SITUS_CITY,SITUS_ZIP,MAIL_ADDR1,MAIL_CITY,MAIL_STATE,MAIL_ZIP",
+        );
         qUrl.searchParams.set("returnGeometry", "false");
         qUrl.searchParams.set("f", "json");
         qUrl.searchParams.set("resultRecordCount", "1");
@@ -970,15 +997,9 @@ export async function lookupByAddress(
             features?: { attributes: Record<string, string> }[];
           };
           const f = data.features?.[0]?.attributes;
-          if (f && f.SITUS_ADDR) {
-            return {
-              address: f.SITUS_ADDR,
-              city: f.SITUS_CITY || "Birmingham",
-              state: "AL",
-              zip: f.SITUS_ZIP || undefined,
-              parcelId: f.PARCELID || undefined,
-              ownerName: f.OWNER1 || undefined,
-            };
+          if (f) {
+            const mapped = mapJccalParcel(f);
+            if (mapped) return mapped;
           }
         }
       } else if (countyKey === "madison") {
@@ -986,7 +1007,10 @@ export async function lookupByAddress(
           "https://services.arcgis.com/V6ZHFr6zdgNZuVG0/ArcGIS/rest/services/Madison_County_Parcels/FeatureServer/0/query",
         );
         qUrl.searchParams.set("where", `UPPER(SITUS_ADDR) LIKE '${streetNum} ${streetName}%'`);
-        qUrl.searchParams.set("outFields", "PARCELID,OWNER_NAME,SITUS_ADDR,SITUS_CITY,SITUS_ZIP");
+        qUrl.searchParams.set(
+          "outFields",
+          "PARCELID,OWNER_NAME,SITUS_ADDR,SITUS_CITY,SITUS_ZIP,MAIL_ADDR,MAIL_CITY,MAIL_STATE,MAIL_ZIP",
+        );
         qUrl.searchParams.set("returnGeometry", "false");
         qUrl.searchParams.set("f", "json");
         qUrl.searchParams.set("resultRecordCount", "1");
@@ -1009,6 +1033,10 @@ export async function lookupByAddress(
               zip: f.SITUS_ZIP || undefined,
               parcelId: f.PARCELID || undefined,
               ownerName: f.OWNER_NAME || undefined,
+              mailingAddress: f.MAIL_ADDR?.trim() || undefined,
+              mailingCity: f.MAIL_CITY?.trim() || undefined,
+              mailingState: f.MAIL_STATE?.trim() || "AL",
+              mailingZip: f.MAIL_ZIP?.trim() || undefined,
             };
           }
         }
