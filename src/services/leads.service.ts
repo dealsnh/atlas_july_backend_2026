@@ -56,7 +56,7 @@ export async function skipTraceLead(id: string) {
   const settings = await getRawSettings();
   if (!settings.skip_trace_key) {
     throw ApiError.badRequest(
-      "Easy Button Skip Trace API key not configured. Go to Settings to add it.",
+      "Skip trace API key not configured. Go to Settings to add your Tracerfy key.",
     );
   }
 

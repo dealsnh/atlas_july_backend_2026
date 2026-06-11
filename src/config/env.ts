@@ -25,6 +25,7 @@ const envSchema = z.object({
   ATTOM_API_KEY: z.string().optional(),
   SKIP_TRACE_KEY: z.string().optional(),
   SKIP_TRACE_API_URL: z.string().url().optional(),
+  SKIP_TRACE_PROVIDER: z.enum(["tracerfy", "generic"]).optional(),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.string().default("587"),
   SMTP_USER: z.string().optional(),

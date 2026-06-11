@@ -318,7 +318,7 @@ export const openApiPaths = {
       tags: ["Leads"],
       summary: "Skip trace a lead",
       description:
-        "Calls Easy Button Skip Trace API (or SKIP_TRACE_API_URL). Requires skip_trace_key in settings.",
+        "Calls Tracerfy (or configured SKIP_TRACE_API_URL). Requires skip_trace_key in settings.",
       operationId: "skipTraceLead",
       security: authSecurity,
       parameters: [openApiParameters.LeadIdParam],
