@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import {
   deleteLeadsHandler,
   enrichLeadsHandler,
+  reconcileLeadsHandler,
   validateScrapeHandler,
 } from "../../../controllers/admin.controller.js";
 import { authMiddleware } from "../../../middleware/auth.js";
@@ -33,5 +34,6 @@ router.post(
   validate(enrichLeadsSchema),
   asyncHandler(enrichLeadsHandler),
 );
+router.post("/reconcile", asyncHandler(authMiddleware), asyncHandler(reconcileLeadsHandler));
 
 export default router;

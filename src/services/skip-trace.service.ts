@@ -1,6 +1,7 @@
 import { env } from "../config/env.js";
 import { updateLeadSkipTrace } from "../repositories/leads.repository.js";
 import type { Lead } from "../types/lead.js";
+import { isPlaceholderOwner } from "./owner-placeholders.js";
 import { ApiError } from "../utils/api-error.js";
 import { logger } from "../utils/logger.js";
 
@@ -131,6 +132,7 @@ export async function skipTraceLeadsBatch(
     try {
       const lead = await lookupLead(id);
       if (!lead || lead.skip_traced) continue;
+      if (isPlaceholderOwner(lead.owner_name)) continue;
 
       const result = await runSkipTrace(lead, apiKey);
       await updateLeadSkipTrace(id, result);

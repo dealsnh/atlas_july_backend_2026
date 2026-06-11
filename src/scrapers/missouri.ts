@@ -20,6 +20,7 @@
 import * as cheerio from "cheerio";
 import { PDFParse } from "pdf-parse";
 import { filterLeadsByTypes, normalizeLeadTypes } from "../config/county-lead-types.js";
+import { extractAddressFromListing } from "../services/owner-placeholders.js";
 import {
   Lead,
   makeId,
@@ -531,6 +532,7 @@ function appendCraigslistFsboLeads(
 
   const pushFsbo = (title: string, link: string, price: string, date: string) => {
     if (!title || title.length < 5) return;
+    const parsedAddress = extractAddressFromListing(title);
     const id = makeId(county, STATE, "FSBO", link || title);
     if (seen.has(id)) return;
     seen.add(id);
@@ -539,8 +541,8 @@ function appendCraigslistFsboLeads(
       county,
       state: STATE,
       lead_type: "FSBO",
-      owner_name: "FSBO Seller",
-      address: title,
+      owner_name: null,
+      address: parsedAddress || title,
       city: defaultCity,
       zip: null,
       mailing_address: null,
@@ -823,7 +825,7 @@ async function scrapeClayCounty(fromDate: string, toDate: string): Promise<Lead[
           county: COUNTY,
           state: STATE,
           lead_type: "Tax Delinquent",
-          owner_name: `Clay County Tax Sale ${text}`.slice(0, 80),
+          owner_name: null,
           address: null,
           city: "Liberty",
           zip: null,
@@ -1065,19 +1067,27 @@ async function scrapeKCCodeViolations(fromDate: string, toDate: string): Promise
 async function scrapeKCCraigslistFSBO(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
   try {
-    const url = `https://kansascity.craigslist.org/search/rea?query=for+sale+by+owner&srchType=A`;
-    const res = await fetchWithRetry(url);
-    if (!res.ok) return leads;
+    const url = `https://kansascity.craigslist.org/search/rea?query=for+sale+by+owner&purveyor=owner`;
+    const html = await fetchBlockedPage(url);
+    if (!html) return leads;
 
-    const html = await res.text();
     const $ = cheerio.load(html);
 
-    $("li.result-row, .cl-search-result").each((_, el) => {
-      const title = $(el).find(".result-title, .title-anchor, a.posting-title").text().trim();
-      const price = $(el).find(".result-price, .priceinfo").text().trim();
-      const date = $(el).find("time").attr("datetime");
-      const link = $(el).find("a.result-title, a.posting-title").attr("href");
-      const location = $(el).find(".result-hood, .supertitle").text().trim().replace(/[()]/g, "");
+    $("li.cl-static-search-result, li.result-row, .cl-search-result").each((_, el) => {
+      const title = $(el)
+        .find(".title, .result-title, a.posting-title, .title-blob")
+        .first()
+        .text()
+        .trim();
+      const price = $(el).find(".price, .result-price, .priceinfo").first().text().trim();
+      const date = $(el).find("time").attr("datetime") || "";
+      const link = $(el).find("a").first().attr("href") || "";
+      const location = $(el)
+        .find(".location, .result-hood, .supertitle, .meta .location")
+        .first()
+        .text()
+        .trim()
+        .replace(/[()]/g, "");
 
       if (!title) return;
 
@@ -1101,13 +1111,15 @@ async function scrapeKCCraigslistFSBO(fromDate: string, toDate: string): Promise
       )
         county = "Cass";
 
+      const parsedAddress = extractAddressFromListing(title);
+
       leads.push({
         id: makeId(county, STATE, "FSBO", link || title),
         county,
         state: STATE,
         lead_type: "FSBO",
-        owner_name: "FSBO Seller",
-        address: title || location || null,
+        owner_name: null,
+        address: parsedAddress || title || location || null,
         city: location || null,
         zip: null,
         mailing_address: null,

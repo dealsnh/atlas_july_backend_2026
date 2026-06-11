@@ -598,7 +598,7 @@ async function scrapeFSBO(fromDate: string, toDate: string): Promise<Lead[]> {
         county: "Hamilton",
         state: "OH",
         lead_type: "FSBO",
-        owner_name: "Unknown (Craigslist)",
+        owner_name: null,
         address: title,
         city: "Cincinnati",
         zip: null,

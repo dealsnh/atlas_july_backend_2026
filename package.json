@@ -17,7 +17,8 @@
     "test:flow": "tsx src/scripts/test-flow.ts",
     "test:live": "tsx src/scripts/live-e2e-test.ts",
     "test:frontend": "tsx src/scripts/frontend-e2e-test.ts",
-    "test:phase1": "tsx src/scripts/phase1-qa.ts"
+    "test:phase1": "tsx src/scripts/phase1-qa.ts",
+    "reconcile:leads": "tsx src/scripts/reconcile-placeholder-leads.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

@@ -63,16 +63,19 @@ async function maybeAutoSkipTrace(
   if (!newLeadIds.length) return;
 
   const settings = await getRawSettings();
-  if (settings.auto_skip_trace !== "true" || !settings.skip_trace_key) return;
+  if (!settings.skip_trace_key) {
+    onProgress?.("Skip trace skipped — no API key configured");
+    return;
+  }
 
-  onProgress?.(`Auto skip-tracing ${newLeadIds.length} new leads...`);
+  onProgress?.(`Skip tracing ${newLeadIds.length} new leads for phone/email...`);
   const { traced, failed } = await skipTraceLeadsBatch(
     newLeadIds,
     findLeadById,
     settings.skip_trace_key,
     onProgress,
   );
-  onProgress?.(`✓ Auto skip trace: ${traced} traced, ${failed} failed`);
+  onProgress?.(`✓ Skip trace complete: ${traced} with contact info, ${failed} no match`);
 }
 
 export async function runScrapeJob(fromDate: string, toDate: string): Promise<number> {
@@ -114,7 +117,7 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
       lastScrapeLog.push(`✓ ${batchNew} leads saved to DB (${totalNew} total)`);
     }
     if (batchSkipped > 0) {
-      lastScrapeLog.push(`⚠ Skipped ${batchSkipped} leads — no assessor owner match`);
+      lastScrapeLog.push(`⚠ Skipped ${batchSkipped} leads — no real owner after enrichment`);
     }
   };
 

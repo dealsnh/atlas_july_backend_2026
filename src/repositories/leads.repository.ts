@@ -235,8 +235,13 @@ export async function deleteLeadsByFilter(filter: {
 
 const NEEDS_ENRICHMENT_WHERE = `
   (owner_name IS NULL OR trim(owner_name) = '' OR length(trim(owner_name)) < 2
+   OR owner_name ILIKE '%fsbo seller%'
+   OR owner_name ILIKE '%unknown%craigslist%'
+   OR owner_name ILIKE 'tax sale%'
+   OR owner_name ILIKE 'clay county tax sale%'
    OR address IS NULL OR trim(address) = '' OR length(trim(address)) < 5
-   OR mailing_address IS NULL OR trim(mailing_address) = '')
+   OR mailing_address IS NULL OR trim(mailing_address) = ''
+   OR (skip_traced IS NOT TRUE AND (st_phone IS NULL OR trim(st_phone) = '')))
 `;
 
 export async function countLeadsNeedingEnrichment(filter: {

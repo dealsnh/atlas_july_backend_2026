@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { enrichExistingLeads } from "../services/enrichment.service.js";
 import { purgeLeads } from "../services/leads.service.js";
 import { validateCountyScrape } from "../services/scrape.service.js";
+import { deleteLeadsByFilter } from "../repositories/leads.repository.js";
 import { successResponse } from "../utils/api-response.js";
 
 export async function deleteLeadsHandler(req: Request, res: Response): Promise<void> {
@@ -31,4 +32,15 @@ export async function enrichLeadsHandler(req: Request, res: Response): Promise<v
   const body = req.body as { county?: string; state?: string; limit?: number };
   const result = await enrichExistingLeads(body);
   successResponse(res, 200, undefined, { ok: true, ...result });
+}
+
+/** Purge placeholder-owner leads and re-enrich remaining rows. */
+export async function reconcileLeadsHandler(_req: Request, res: Response): Promise<void> {
+  const patterns = ["FSBO Seller", "Unknown (Craigslist)", "Clay County Tax Sale", "Tax Sale"];
+  let purged = 0;
+  for (const p of patterns) {
+    purged += await deleteLeadsByFilter({ owner_name_contains: p });
+  }
+  const enriched = await enrichExistingLeads({ limit: 2000 });
+  successResponse(res, 200, undefined, { ok: true, purged, ...enriched });
 }

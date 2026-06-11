@@ -5,9 +5,18 @@
  */
 
 import * as cheerio from "cheerio";
-import { Lead, CountyConfig, makeId, formatDate, fetchWithRetry, fetchRendered } from "./base.js";
+import {
+  Lead,
+  CountyConfig,
+  makeId,
+  formatDate,
+  fetchWithRetry,
+  fetchRendered,
+  fetchBlockedPage,
+} from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
 import * as XLSX from "xlsx";
+import { extractAddressFromListing } from "../services/owner-placeholders.js";
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -443,10 +452,9 @@ async function scrapeFSBO(county: string, fromDate: string, toDate: string): Pro
 
   try {
     const url = `https://${city}.craigslist.org/search/rea?purveyor=owner`;
-    const res = await fetchWithRetry(url);
-    if (!res.ok) return leads;
+    const html = await fetchBlockedPage(url);
+    if (!html) return leads;
 
-    const html = await res.text();
     const $ = cheerio.load(html);
 
     $("li.cl-static-search-result, li.result-row, .cl-search-result").each((_, el) => {
@@ -467,13 +475,15 @@ async function scrapeFSBO(county: string, fromDate: string, toDate: string): Pro
 
       if (!title) return;
 
+      const parsedAddress = extractAddressFromListing(title);
+
       leads.push({
         id: makeId(title, county, "AL", "fsbo"),
         county,
         state: "AL",
         lead_type: "FSBO",
-        owner_name: "FSBO Seller",
-        address: title,
+        owner_name: null,
+        address: parsedAddress || title,
         city: location || null,
         zip: null,
         mailing_address: null,
