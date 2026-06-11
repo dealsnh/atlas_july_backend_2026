@@ -2,6 +2,8 @@ import { Router, type IRouter } from "express";
 import {
   deleteLeadsHandler,
   enrichLeadsHandler,
+  listRawLeadsHandler,
+  rawLeadStatsHandler,
   reconcileLeadsHandler,
   validateScrapeHandler,
 } from "../../../controllers/admin.controller.js";
@@ -35,5 +37,7 @@ router.post(
   asyncHandler(enrichLeadsHandler),
 );
 router.post("/reconcile", asyncHandler(authMiddleware), asyncHandler(reconcileLeadsHandler));
+router.get("/raw-leads", asyncHandler(authMiddleware), asyncHandler(listRawLeadsHandler));
+router.get("/raw-leads/stats", asyncHandler(authMiddleware), asyncHandler(rawLeadStatsHandler));
 
 export default router;

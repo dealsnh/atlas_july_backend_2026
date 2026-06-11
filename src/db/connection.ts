@@ -55,6 +55,6 @@ export async function isDbReady(): Promise<boolean> {
 export async function resetDbForTests(): Promise<void> {
   await initDb();
   await getPool().query(
-    "TRUNCATE TABLE leads, scrape_runs, settings, users RESTART IDENTITY CASCADE",
+    "TRUNCATE TABLE raw_leads, leads, scrape_runs, settings, users RESTART IDENTITY CASCADE",
   );
 }

@@ -67,6 +67,41 @@ export const SCHEMA_SQL = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_users_email ON users (LOWER(email));
+
+  CREATE TABLE IF NOT EXISTS raw_leads (
+    id                TEXT NOT NULL,
+    scrape_run_id     INTEGER NOT NULL REFERENCES scrape_runs(id) ON DELETE CASCADE,
+    county            TEXT NOT NULL,
+    state             TEXT NOT NULL,
+    lead_type         TEXT NOT NULL,
+    owner_name        TEXT,
+    address           TEXT,
+    city              TEXT,
+    zip               TEXT,
+    mailing_address   TEXT,
+    mailing_city      TEXT,
+    mailing_state     TEXT,
+    mailing_zip       TEXT,
+    case_number       TEXT,
+    filing_date       TEXT,
+    assessed_value    TEXT,
+    tax_year          TEXT,
+    lender            TEXT,
+    loan_amount       TEXT,
+    sale_date         TEXT,
+    sale_amount       TEXT,
+    description       TEXT,
+    source_url        TEXT,
+    raw_data          TEXT,
+    promoted_to_lead  BOOLEAN NOT NULL DEFAULT FALSE,
+    reject_reason     TEXT,
+    scraped_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (scrape_run_id, id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_raw_leads_run ON raw_leads(scrape_run_id);
+  CREATE INDEX IF NOT EXISTS idx_raw_leads_county ON raw_leads(county, state);
+  CREATE INDEX IF NOT EXISTS idx_raw_leads_promoted ON raw_leads(promoted_to_lead);
 `;
 
 export const CLEANUP_JUNK_LEADS_SQL = `

@@ -6,6 +6,12 @@ import {
   findLeads,
   insertLeadIfNotExists,
 } from "../repositories/leads.repository.js";
+import { RAW_REJECT_REASON, resolveRejectReason } from "../config/raw-lead-reasons.js";
+import {
+  countRawLeadsForRun,
+  finalizeRawLead,
+  upsertRawLead,
+} from "../repositories/raw-leads.repository.js";
 import {
   finishScrapeRun,
   getLastScrapeTime,
@@ -93,6 +99,11 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
 
   const saveBatch = async (batch: Parameters<typeof enrichLeads>[0]): Promise<void> => {
     if (!batch.length) return;
+
+    for (const lead of batch) {
+      await upsertRawLead(runId, lead);
+    }
+
     const enriched = await enrichLeads(batch, (msg) => {
       lastScrapeLog.push(msg);
       logger.info({ msg }, "Enrichment progress");
@@ -100,9 +111,19 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
     let batchNew = 0;
     let batchSkipped = 0;
     for (const lead of enriched) {
-      if (savedIds.has(lead.id)) continue;
+      if (savedIds.has(lead.id)) {
+        await finalizeRawLead(runId, lead, {
+          promoted: false,
+          rejectReason: RAW_REJECT_REASON.DUPLICATE_IN_BATCH,
+        });
+        continue;
+      }
       if (!isLeadSaveable(lead)) {
         batchSkipped++;
+        await finalizeRawLead(runId, lead, {
+          promoted: false,
+          rejectReason: resolveRejectReason(lead),
+        });
         continue;
       }
       const isNew = await insertLeadIfNotExists(lead as unknown as Record<string, string | null>);
@@ -111,6 +132,12 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
         batchNew++;
         newLeadIds.push(lead.id);
         savedIds.add(lead.id);
+        await finalizeRawLead(runId, lead, { promoted: true, rejectReason: null });
+      } else {
+        await finalizeRawLead(runId, lead, {
+          promoted: false,
+          rejectReason: RAW_REJECT_REASON.DUPLICATE,
+        });
       }
     }
     if (batchNew > 0) {
@@ -143,6 +170,11 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
       lastScrapeLog.push(`⚠ ${errors.length} errors: ${errors.join("; ")}`);
     }
     lastScrapeLog.push(`✓ Done: ${totalNew} new leads saved`);
+
+    const rawTotals = await countRawLeadsForRun(runId);
+    lastScrapeLog.push(
+      `✓ Raw leads: ${rawTotals.scraped} scraped, ${rawTotals.saved} promoted, ${rawTotals.rejected} rejected`,
+    );
 
     lastScrapeTime = new Date().toISOString();
     await setLastScrapeTime(lastScrapeTime);
