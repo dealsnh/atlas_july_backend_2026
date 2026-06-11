@@ -1,6 +1,5 @@
 import type { Request, Response } from "express";
-import { exportLeadsCsv, listLeads, patchLead, skipTraceLead } from "../services/leads.service.js";
-import { getRawSettings } from "../services/settings.service.js";
+import { exportLeadsCsv, listLeads, patchLead } from "../services/leads.service.js";
 import { ApiError } from "../utils/api-error.js";
 import { successResponse } from "../utils/api-response.js";
 
@@ -24,20 +23,6 @@ export async function updateLeadHandler(req: Request, res: Response): Promise<vo
   successResponse(res, 200, undefined, { ok: true });
 }
 
-export async function skipTraceHandler(req: Request, res: Response): Promise<void> {
-  const id = req.params.id as string;
-  const settings = await getRawSettings();
-  if (!settings.skip_trace_key) {
-    throw ApiError.badRequest(
-      "Skip trace API key not configured. Go to Settings to add your Tracerfy key.",
-    );
-  }
-
-  const result = await skipTraceLead(id);
-  successResponse(res, 200, undefined, {
-    ok: true,
-    phone: result.phone,
-    email: result.email,
-    mailing: result.mailing,
-  });
+export async function skipTraceHandler(_req: Request, _res: Response): Promise<void> {
+  throw ApiError.notImplemented("Skip trace is disabled for now.");
 }

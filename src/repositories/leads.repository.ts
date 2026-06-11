@@ -240,8 +240,7 @@ const NEEDS_ENRICHMENT_WHERE = `
    OR owner_name ILIKE 'tax sale%'
    OR owner_name ILIKE 'clay county tax sale%'
    OR address IS NULL OR trim(address) = '' OR length(trim(address)) < 5
-   OR mailing_address IS NULL OR trim(mailing_address) = ''
-   OR (skip_traced IS NOT TRUE AND (st_phone IS NULL OR trim(st_phone) = '')))
+   OR mailing_address IS NULL OR trim(mailing_address) = '')
 `;
 
 export async function countLeadsNeedingEnrichment(filter: {

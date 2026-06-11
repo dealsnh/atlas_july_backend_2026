@@ -2,7 +2,6 @@ import cron from "node-cron";
 import { resolveCountyLeadTypes } from "../config/county-lead-types.js";
 import { clientConfig } from "../config/constants.js";
 import {
-  findLeadById,
   findLeads,
   insertLeadIfNotExists,
 } from "../repositories/leads.repository.js";
@@ -24,7 +23,6 @@ import { logger } from "../utils/logger.js";
 import { enrichLeads, isLeadSaveable } from "./enrichment.service.js";
 import { sendDailyReport } from "./email.service.js";
 import { getEmailRecipients, getRawSettings, isSmtpReady } from "./settings.service.js";
-import { skipTraceLeadsBatch } from "./skip-trace.service.js";
 
 let scrapeInProgress = false;
 let lastScrapeLog: string[] = [];
@@ -62,28 +60,6 @@ function buildCountyConfigs(): CountyConfig[] {
   }));
 }
 
-async function maybeAutoSkipTrace(
-  newLeadIds: string[],
-  onProgress?: (msg: string) => void,
-): Promise<void> {
-  if (!newLeadIds.length) return;
-
-  const settings = await getRawSettings();
-  if (!settings.skip_trace_key) {
-    onProgress?.("Skip trace skipped — no API key configured");
-    return;
-  }
-
-  onProgress?.(`Skip tracing ${newLeadIds.length} new leads for phone/email...`);
-  const { traced, failed } = await skipTraceLeadsBatch(
-    newLeadIds,
-    findLeadById,
-    settings.skip_trace_key,
-    onProgress,
-  );
-  onProgress?.(`✓ Skip trace complete: ${traced} with contact info, ${failed} no match`);
-}
-
 export async function runScrapeJob(fromDate: string, toDate: string): Promise<number> {
   if (scrapeInProgress) {
     throw new Error("Scrape already in progress");
@@ -94,7 +70,6 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
   let totalNew = 0;
   const runId = await logScrapeRun(fromDate, toDate);
 
-  const newLeadIds: string[] = [];
   const savedIds = new Set<string>();
 
   const saveBatch = async (batch: Parameters<typeof enrichLeads>[0]): Promise<void> => {
@@ -130,7 +105,6 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
       if (isNew) {
         totalNew++;
         batchNew++;
-        newLeadIds.push(lead.id);
         savedIds.add(lead.id);
         await finalizeRawLead(runId, lead, { promoted: true, rejectReason: null });
       } else {
@@ -160,11 +134,6 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
       },
       saveBatch,
     );
-
-    await maybeAutoSkipTrace(newLeadIds, (msg) => {
-      lastScrapeLog.push(msg);
-      logger.info({ msg }, "Skip trace progress");
-    });
 
     if (errors.length) {
       lastScrapeLog.push(`⚠ ${errors.length} errors: ${errors.join("; ")}`);
