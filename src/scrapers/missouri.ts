@@ -30,6 +30,10 @@ import {
   fetchBlockedPage,
   CountyConfig,
 } from "./base.js";
+import {
+  collectCraigslistSearchItems,
+  fetchCraigslistListingDetails,
+} from "./craigslist.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
 
 const STATE = "MO";
@@ -765,7 +769,13 @@ function parseSheriffNoticeText(
 
   if (!caseNum && !owner && !address) return null;
 
-  const city = /Kansas City/i.test(text) ? "Kansas City" : "Liberty";
+  let city = "Liberty";
+  if (/Kansas City/i.test(text)) city = "Kansas City";
+  else if (/Platte City/i.test(text)) city = "Platte City";
+  else if (/Parkville/i.test(text)) city = "Parkville";
+  else if (/Weston/i.test(text)) city = "Weston";
+  else if (county === "Platte") city = "Platte City";
+  else if (county === "Cass") city = "Harrisonville";
   return {
     id: makeId(county, state, "Sheriff Sale", caseNum || owner || address || text.slice(0, 40)),
     county,
@@ -920,18 +930,45 @@ async function scrapePlatteCounty(fromDate: string, toDate: string): Promise<Lea
       "https://kansascity.craigslist.org/search/rea?query=weston+mo&purveyor=owner",
       "https://kansascity.craigslist.org/search/rea?query=platte+city&purveyor=owner",
     ];
-    const fsboHtmls = await Promise.all(fsboSearches.map((u) => fetchBlockedPage(u)));
     const seenFsbo = new Set<string>();
-    for (let i = 0; i < fsboSearches.length; i++) {
-      const fsboHtml = fsboHtmls[i];
+    for (const searchUrl of fsboSearches) {
+      const fsboHtml = await fetchBlockedPage(searchUrl);
       if (!fsboHtml) continue;
-      const batch: Lead[] = [];
-      appendCraigslistFsboLeads(batch, fsboHtml, COUNTY, fsboSearches[i], fromDate, "Platte City");
-      for (const lead of batch) {
-        if (!seenFsbo.has(lead.id)) {
-          seenFsbo.add(lead.id);
-          leads.push(lead);
-        }
+      const items = collectCraigslistSearchItems(fsboHtml, "https://kansascity.craigslist.org");
+      const detailed = await fetchCraigslistListingDetails(items, 12);
+      for (const item of detailed) {
+        const address = item.address || extractAddressFromListing(item.title);
+        if (!address || address.length < 5) continue;
+        const id = makeId(COUNTY, STATE, "FSBO", item.url);
+        if (seenFsbo.has(id)) continue;
+        const prop = await lookupByAddress(address, COUNTY, STATE);
+        if (!prop?.ownerName) continue;
+        seenFsbo.add(id);
+        leads.push({
+          id,
+          county: COUNTY,
+          state: STATE,
+          lead_type: "FSBO",
+          owner_name: prop.ownerName,
+          address: prop.address || address,
+          city: prop.city || item.city || "Platte City",
+          zip: prop.zip || item.zip || null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
+          case_number: null,
+          filing_date: formatDate(item.date || fromDate),
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: (item.price || "").replace(/[^\d.]/g, "") || null,
+          description: item.title,
+          source_url: item.url,
+          raw_data: JSON.stringify({ title: item.title, price: item.price }),
+        });
       }
     }
 
@@ -1064,81 +1101,81 @@ async function scrapeKCCodeViolations(fromDate: string, toDate: string): Promise
 }
 
 // ─── KC Craigslist FSBO ───────────────────────────────────────────────────────
+function resolveMoCountyFromLocation(location: string): string {
+  const locLower = location.toLowerCase();
+  if (locLower.includes("liberty") || locLower.includes("kearney") || locLower.includes("clay"))
+    return "Clay";
+  if (
+    locLower.includes("platte") ||
+    locLower.includes("parkville") ||
+    locLower.includes("camden") ||
+    locLower.includes("weston") ||
+    locLower.includes("dearborn") ||
+    locLower.includes("smithville")
+  )
+    return "Platte";
+  if (
+    locLower.includes("cass") ||
+    locLower.includes("harrisonville") ||
+    locLower.includes("belton")
+  )
+    return "Cass";
+  return "Jackson";
+}
+
 async function scrapeKCCraigslistFSBO(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
+  const baseHost = "https://kansascity.craigslist.org";
   try {
-    const url = `https://kansascity.craigslist.org/search/rea?query=for+sale+by+owner&purveyor=owner`;
+    const url = `${baseHost}/search/rea?query=for+sale+by+owner&purveyor=owner`;
     const html = await fetchBlockedPage(url);
     if (!html) return leads;
 
-    const $ = cheerio.load(html);
+    const items = collectCraigslistSearchItems(html, baseHost);
+    const detailed = await fetchCraigslistListingDetails(items, 30);
 
-    $("li.cl-static-search-result, li.result-row, .cl-search-result").each((_, el) => {
-      const title = $(el)
-        .find(".title, .result-title, a.posting-title, .title-blob")
-        .first()
-        .text()
-        .trim();
-      const price = $(el).find(".price, .result-price, .priceinfo").first().text().trim();
-      const date = $(el).find("time").attr("datetime") || "";
-      const link = $(el).find("a").first().attr("href") || "";
-      const location = $(el)
-        .find(".location, .result-hood, .supertitle, .meta .location")
-        .first()
-        .text()
-        .trim()
-        .replace(/[()]/g, "");
+    for (const item of detailed) {
+      const location = item.location?.replace(/[()]/g, "").trim() || "";
+      const county = resolveMoCountyFromLocation(location);
+      const address =
+        item.address ||
+        extractAddressFromListing(item.title) ||
+        extractAddressFromListing(location);
+      if (!address || address.length < 5) continue;
 
-      if (!title) return;
-
-      const locLower = location.toLowerCase();
-      let county = "Jackson";
-      if (locLower.includes("liberty") || locLower.includes("kearney") || locLower.includes("clay"))
-        county = "Clay";
-      else if (
-        locLower.includes("platte") ||
-        locLower.includes("parkville") ||
-        locLower.includes("camden") ||
-        locLower.includes("weston") ||
-        locLower.includes("dearborn") ||
-        locLower.includes("smithville")
-      )
-        county = "Platte";
-      else if (
-        locLower.includes("cass") ||
-        locLower.includes("harrisonville") ||
-        locLower.includes("belton")
-      )
-        county = "Cass";
-
-      const parsedAddress = extractAddressFromListing(title);
-
-      leads.push({
-        id: makeId(county, STATE, "FSBO", link || title),
+      const lead: Lead = {
+        id: makeId(county, STATE, "FSBO", item.url),
         county,
         state: STATE,
         lead_type: "FSBO",
         owner_name: null,
-        address: parsedAddress || title || location || null,
-        city: location || null,
-        zip: null,
+        address,
+        city: item.city || location || null,
+        zip: item.zip || address.match(/\b(\d{5})\b/)?.[1] || null,
         mailing_address: null,
         mailing_city: null,
         mailing_state: null,
         mailing_zip: null,
         case_number: null,
-        filing_date: formatDate(date || fromDate),
+        filing_date: formatDate(item.date || fromDate),
         assessed_value: null,
         tax_year: null,
         lender: null,
         loan_amount: null,
         sale_date: null,
-        sale_amount: price || null,
-        description: title,
-        source_url: link?.startsWith("http") ? link : `https://kansascity.craigslist.org${link}`,
-        raw_data: JSON.stringify({ title, price, location }),
-      });
-    });
+        sale_amount: (item.price || "").replace(/[^\d.]/g, "") || null,
+        description: item.title,
+        source_url: item.url,
+        raw_data: JSON.stringify({ title: item.title, price: item.price, location }),
+      };
+
+      const prop = await lookupByAddress(address, county, STATE);
+      if (prop?.ownerName) lead.owner_name = prop.ownerName;
+      if (prop?.address) lead.address = prop.address;
+      if (prop?.city) lead.city = prop.city;
+      if (prop?.zip) lead.zip = prop.zip;
+      if (lead.owner_name?.trim()) leads.push(lead);
+    }
   } catch (e) {
     console.error(`[MO] Craigslist FSBO error:`, e);
   }
@@ -1167,13 +1204,12 @@ async function scrapeLisPendens(fromDate: string, toDate: string): Promise<Lead[
         toDate,
         submit: "Search",
       }).toString();
-      const res = await fetchWithRetry(url, {
+      const html = await fetchBlockedPage(url, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body,
       });
-      if (!res.ok) continue;
-      const html = await res.text();
+      if (!html) continue;
       const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
       const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
       const rows = html.match(rowRe) || [];
@@ -1257,13 +1293,12 @@ async function scrapeMOProbate(fromDate: string, toDate: string): Promise<Lead[]
         toDate,
         submit: "Search",
       }).toString();
-      const res = await fetchWithRetry(url, {
+      const html = await fetchBlockedPage(url, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body,
       });
-      if (!res.ok) continue;
-      const html = await res.text();
+      if (!html) continue;
       const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
       const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
       const rows = html.match(rowRe) || [];

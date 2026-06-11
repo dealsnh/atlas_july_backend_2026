@@ -15,6 +15,10 @@ import {
   fetchBlockedPage,
 } from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
+import {
+  collectCraigslistSearchItems,
+  fetchCraigslistListingDetails,
+} from "./craigslist.js";
 import * as XLSX from "xlsx";
 import { extractAddressFromListing } from "../services/owner-placeholders.js";
 
@@ -33,6 +37,62 @@ const AL_CRAIGSLIST: Record<string, string> = {
   Jefferson: "bham",
   Shelby: "bham",
 };
+
+const AL_COUNTY_CITIES: Record<string, string> = {
+  Jefferson: "Birmingham",
+  Madison: "Huntsville",
+  Shelby: "Birmingham",
+  Morgan: "Decatur",
+  Limestone: "Athens",
+  Montgomery: "Montgomery",
+  Autauga: "Prattville",
+  Elmore: "Wetumpka",
+};
+
+function inferCityFromAddress(address: string | null, county: string): string | null {
+  if (!address) return AL_COUNTY_CITIES[county] || null;
+  const known = [
+    "Birmingham",
+    "Hoover",
+    "Vestavia",
+    "Homewood",
+    "Bessemer",
+    "Huntsville",
+    "Madison",
+    "Decatur",
+    "Athens",
+    "Montgomery",
+    "Prattville",
+    "Millbrook",
+    "Wetumpka",
+    "Pinson",
+    "Trussville",
+    "Pelham",
+    "Alabaster",
+  ];
+  for (const c of known) {
+    if (new RegExp(`\\b${c}\\b`, "i").test(address)) return c;
+  }
+  const comma = address.split(",").map((s) => s.trim());
+  if (comma.length >= 2) {
+    const candidate = comma[comma.length - 1].replace(/\s*AL\s*\d{5}.*$/i, "").trim();
+    if (candidate.length >= 3 && /[A-Za-z]/.test(candidate)) return candidate;
+  }
+  return AL_COUNTY_CITIES[county] || null;
+}
+
+async function fetchAlTaxHtml(url: string): Promise<string> {
+  let res = await fetchWithRetry(url, { headers: HEADERS });
+  let html = res.ok ? await res.text() : "";
+  if (!html || html.length < 500 || res.status === 403) {
+    html = await fetchBlockedPage(url);
+  }
+  if (!html || html.length < 500) {
+    const rendered = await fetchRendered(url);
+    if (rendered.ok) html = await rendered.text();
+  }
+  return html;
+}
 
 async function fetchAlaCourtHtml(url: string): Promise<string> {
   let res = await fetchWithRetry(url, { headers: HEADERS });
@@ -273,12 +333,8 @@ async function scrapeTaxDelinquent(
     `https://www.revenue.alabama.gov/property-tax/delinquent-property-tax-list/?county=${county}`;
 
   try {
-    let res = await fetchWithRetry(url);
-    if (!res.ok || res.status === 403) {
-      res = await fetchRendered(url);
-    }
-    if (!res.ok) return leads;
-    const html = await res.text();
+    const html = await fetchAlTaxHtml(url);
+    if (!html) return leads;
     const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
     const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
     const rows = html.match(rowRe) || [];
@@ -315,15 +371,18 @@ async function scrapeTaxDelinquent(
       // Must look like a real owner name: letters, not just whitespace/symbols
       if (!/[A-Za-z]{2,}/.test(firstCell)) continue;
 
+      const addr = cells[1] || null;
+      const city = inferCityFromAddress(addr, county);
+
       leads.push({
         id: makeId(cells[0], county, "AL", "tax"),
         county,
         state: "AL",
         lead_type: "Tax Delinquent",
         owner_name: cells[0],
-        address: cells[1] || null,
-        city: null,
-        zip: null,
+        address: addr,
+        city,
+        zip: addr?.match(/\b(\d{5})\b/)?.[1] || null,
         mailing_address: null,
         mailing_city: null,
         mailing_state: null,
@@ -356,6 +415,10 @@ async function scrapeTaxDelinquent(
         if (prop?.city) batch[j].city = prop.city;
         if (prop?.zip) batch[j].zip = prop.zip;
       }
+    }
+
+    for (const lead of leads) {
+      if (!lead.city) lead.city = inferCityFromAddress(lead.address, county);
     }
   } catch (_) {
     /* silent */
@@ -439,72 +502,103 @@ async function scrapeSheriffSales(
       const prop = results[j];
       if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
       if (prop?.address) batch[j].address = prop.address;
+      if (prop?.city) batch[j].city = prop.city || batch[j].city;
       if (prop?.zip) batch[j].zip = prop.zip;
     }
   }
+
+  for (const lead of leads) {
+    if (!lead.city) lead.city = inferCityFromAddress(lead.address, county);
+  }
   return leads;
 }
-// ─── Craigslist FSBO ──────────────────────────────────────────────────────────
+// ─── Craigslist FSBO — search + full listing page for street address ──────────
 async function scrapeFSBO(county: string, fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
-  const city = AL_CRAIGSLIST[county];
-  if (!city) return leads;
+  const clCity = AL_CRAIGSLIST[county];
+  if (!clCity) return leads;
+
+  const baseHost = `https://${clCity}.craigslist.org`;
+  const defaultCity = AL_COUNTY_CITIES[county] || null;
 
   try {
-    const url = `https://${city}.craigslist.org/search/rea?purveyor=owner`;
-    const html = await fetchBlockedPage(url);
+    const searchUrl = `${baseHost}/search/rea?purveyor=owner`;
+    const html = await fetchBlockedPage(searchUrl);
     if (!html) return leads;
 
-    const $ = cheerio.load(html);
+    const items = collectCraigslistSearchItems(html, baseHost);
+    const detailed = await fetchCraigslistListingDetails(items, 25);
 
-    $("li.cl-static-search-result, li.result-row, .cl-search-result").each((_, el) => {
-      const title = $(el)
-        .find(".title, .result-title, a.posting-title, .title-blob")
-        .first()
-        .text()
-        .trim();
-      const price = $(el).find(".price, .result-price, .priceinfo").first().text().trim();
-      const date = $(el).find("time").attr("datetime") || "";
-      const link = $(el).find("a").first().attr("href") || "";
-      const location = $(el)
-        .find(".location, .result-hood, .meta .location")
-        .first()
-        .text()
-        .trim()
-        .replace(/[()]/g, "");
+    const CONCURRENCY = 8;
+    const needsOwner: Lead[] = [];
 
-      if (!title) return;
+    for (const item of detailed) {
+      const title = item.title || "";
+      const address =
+        item.address ||
+        extractAddressFromListing(title) ||
+        extractAddressFromListing(item.location);
+      if (!address || address.length < 5) continue;
 
-      const parsedAddress = extractAddressFromListing(title);
+      const leadCity =
+        item.city ||
+        (item.location?.replace(/[()]/g, "").trim() || null) ||
+        inferCityFromAddress(address, county) ||
+        defaultCity;
 
-      leads.push({
-        id: makeId(title, county, "AL", "fsbo"),
+      const lead: Lead = {
+        id: makeId(item.url, county, "AL", "fsbo"),
         county,
         state: "AL",
         lead_type: "FSBO",
         owner_name: null,
-        address: parsedAddress || title,
-        city: location || null,
-        zip: null,
+        address,
+        city: leadCity,
+        zip: item.zip || address.match(/\b(\d{5})\b/)?.[1] || null,
         mailing_address: null,
         mailing_city: null,
         mailing_state: null,
         mailing_zip: null,
         case_number: null,
-        filing_date: formatDate(date) || new Date().toISOString().split("T")[0],
+        filing_date: formatDate(item.date || fromDate),
         assessed_value: null,
         tax_year: null,
         lender: null,
         loan_amount: null,
         sale_date: null,
-        sale_amount: price.replace(/[^\d.]/g, "") || null,
+        sale_amount: (item.price || "").replace(/[^\d.]/g, "") || null,
         description: title,
-        source_url: link.startsWith("http") ? link : `https://${city}.craigslist.org${link}`,
-        raw_data: JSON.stringify({ title, price, location }),
-      });
-    });
-  } catch (_) {
-    /* silent */
+        source_url: item.url,
+        raw_data: JSON.stringify({
+          title,
+          price: item.price,
+          location: item.location,
+          detailAddress: item.address,
+        }),
+      };
+      needsOwner.push(lead);
+    }
+
+    for (let i = 0; i < needsOwner.length; i += CONCURRENCY) {
+      const batch = needsOwner.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(
+        batch.map((l) => lookupByAddress(l.address!, county, "AL")),
+      );
+      for (let j = 0; j < batch.length; j++) {
+        const prop = results[j];
+        if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
+        if (prop?.address) batch[j].address = prop.address;
+        if (prop?.city) batch[j].city = prop.city;
+        if (prop?.zip) batch[j].zip = prop.zip;
+      }
+    }
+
+    for (const lead of needsOwner) {
+      if (!lead.city) lead.city = defaultCity;
+      if (lead.owner_name?.trim()) leads.push(lead);
+    }
+  } catch (e) {
+    console.error(`[AL ${county}] FSBO error:`, e);
   }
   return leads;
 }

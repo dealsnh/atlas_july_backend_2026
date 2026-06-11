@@ -192,22 +192,41 @@ function fetchViaBrightDataCurl(url: string, options: RequestInit = {}): string 
   return result.stdout || "";
 }
 
+function needsResidentialProxy(url: string): boolean {
+  return (
+    url.includes("craigslist.org") ||
+    url.includes("plattesheriff.org") ||
+    url.includes("plattecountycollector.com") ||
+    url.includes("courts.mo.gov/casenet")
+  );
+}
+
 /**
  * fetchBlockedPage — direct fetch, then ScraperAPI proxy + render for sites that
  * block datacenter IPs (e.g. Platte sheriff, Craigslist on Railway).
+ * Craigslist + Platte + Case.net try Bright Data residential proxy first.
  */
 export async function fetchBlockedPage(url: string, options: RequestInit = {}): Promise<string> {
   const SCRAPER_KEY = process.env.SCRAPER_API_KEY;
   const isCraigslist = url.includes("craigslist.org");
   let html = "";
+  let lastReason = "empty";
+
+  if (needsResidentialProxy(url)) {
+    const bright = fetchViaBrightDataCurl(url, options);
+    if (bright && !looksBlocked(bright)) return bright;
+    if (bright) lastReason = "bright_data_blocked";
+  }
 
   try {
     const res = await fetchWithRetry(url, options);
     if (res.ok) html = await res.text();
+    else lastReason = `http_${res.status}`;
   } catch {
-    /* try proxy */
+    lastReason = "direct_fetch_failed";
   }
   if (html && !looksBlocked(html)) return html;
+  if (html && looksBlocked(html)) lastReason = "direct_blocked";
 
   if (SCRAPER_KEY) {
     try {
@@ -246,7 +265,11 @@ export async function fetchBlockedPage(url: string, options: RequestInit = {}): 
 
   const bright = fetchViaBrightDataCurl(url, options);
   if (bright && !looksBlocked(bright)) return bright;
+  if (bright) lastReason = "bright_data_blocked";
 
+  if (!html && lastReason !== "empty") {
+    console.warn(`[fetchBlockedPage] ${lastReason}: ${url.slice(0, 120)}`);
+  }
   return html;
 }
 
