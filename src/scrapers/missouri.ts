@@ -942,17 +942,16 @@ async function scrapePlatteCounty(fromDate: string, toDate: string): Promise<Lea
         const id = makeId(COUNTY, STATE, "FSBO", item.url);
         if (seenFsbo.has(id)) continue;
         const prop = await lookupByAddress(address, COUNTY, STATE);
-        if (!prop?.ownerName) continue;
         seenFsbo.add(id);
         leads.push({
           id,
           county: COUNTY,
           state: STATE,
           lead_type: "FSBO",
-          owner_name: prop.ownerName,
-          address: prop.address || address,
-          city: prop.city || item.city || "Platte City",
-          zip: prop.zip || item.zip || null,
+          owner_name: prop?.ownerName || null,
+          address: prop?.address || address,
+          city: prop?.city || item.city || "Platte City",
+          zip: prop?.zip || item.zip || null,
           mailing_address: null,
           mailing_city: null,
           mailing_state: null,
@@ -1174,7 +1173,7 @@ async function scrapeKCCraigslistFSBO(fromDate: string, toDate: string): Promise
       if (prop?.address) lead.address = prop.address;
       if (prop?.city) lead.city = prop.city;
       if (prop?.zip) lead.zip = prop.zip;
-      if (lead.owner_name?.trim()) leads.push(lead);
+      if (lead.address && lead.city) leads.push(lead);
     }
   } catch (e) {
     console.error(`[MO] Craigslist FSBO error:`, e);

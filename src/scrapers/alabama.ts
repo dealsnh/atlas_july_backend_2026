@@ -595,7 +595,7 @@ async function scrapeFSBO(county: string, fromDate: string, toDate: string): Pro
 
     for (const lead of needsOwner) {
       if (!lead.city) lead.city = defaultCity;
-      if (lead.owner_name?.trim()) leads.push(lead);
+      if (lead.address && lead.city) leads.push(lead);
     }
   } catch (e) {
     console.error(`[AL ${county}] FSBO error:`, e);
