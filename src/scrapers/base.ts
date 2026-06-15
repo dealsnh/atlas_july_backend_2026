@@ -39,6 +39,13 @@ export function formatDate(d: string | null | undefined): string | null {
   return parsed.toISOString().split("T")[0];
 }
 
+/** Convert YYYY-MM-DD (API dates) to MM/DD/YYYY for MO Case.net and AlaCourt. */
+export function toUsDate(isoDate: string): string {
+  const [y, m, d] = isoDate.split("-");
+  if (!y || !m || !d) return isoDate;
+  return `${m}/${d}/${y}`;
+}
+
 // URLs that should NEVER go through ScraperAPI
 const SKIP_SCRAPER_PATTERNS = [
   "uscourts.gov", // PACER — requires court auth
@@ -55,6 +62,7 @@ const SKIP_SCRAPER_PATTERNS = [
   "claycountymo.tax", // Clay MO collector tax sale
   "plattecountycollector.com", // Platte MO collector — weak TLS; use fetchBlockedPage
   "casscounty.com", // Cass MO
+  "capturecama.com", // AL CaptureCAMA JSON APIs — direct POST works
   "rubinlublin.com", // AL statewide foreclosure listings (legacy)
   "rlselaw.com", // Rubin Lublin AL property listings
   "jeffcointouch.com", // Jefferson AL portal
@@ -157,7 +165,7 @@ export async function fetchRendered(url: string, retries = 2): Promise<Response>
 
 function looksBlocked(html: string): boolean {
   if (!html || html.length < 150) return true;
-  return /403 Forbidden|Access Denied|cf-browser-verification|Just a moment|captcha|g-recaptcha|login required|please sign in|session expired|enable javascript/i.test(
+  return /403 Forbidden|Error 403|Access Denied|data scraper|expressly prohibited|cf-browser-verification|Just a moment|captcha|g-recaptcha|login required|please sign in|session expired|enable javascript|frmlogin\.aspx/i.test(
     html,
   );
 }

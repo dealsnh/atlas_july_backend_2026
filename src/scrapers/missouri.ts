@@ -32,6 +32,7 @@ import {
   settleScraperResults,
   courtCaseToLead,
   validateHtmlResponse,
+  toUsDate,
 } from "./base.js";
 import {
   collectCraigslistSearchItems,
@@ -41,6 +42,77 @@ import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
 
 const STATE = "MO";
 const OUTER_MO_COUNTIES = new Set(["clay", "platte", "cass"]);
+const CASE_NET_URL = "https://www.courts.mo.gov/casenet/cases/searchCases.do";
+
+function* caseNetWeekStarts(fromDate: string, toDate: string): Generator<{ from: string; to: string }> {
+  let cur = new Date(`${fromDate}T00:00:00`);
+  const end = new Date(`${toDate}T23:59:59`);
+  while (cur <= end) {
+    const weekEnd = new Date(cur);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    if (weekEnd > end) weekEnd.setTime(end.getTime());
+    yield {
+      from: toUsDate(cur.toISOString().slice(0, 10)),
+      to: toUsDate(weekEnd.toISOString().slice(0, 10)),
+    };
+    cur.setDate(cur.getDate() + 7);
+  }
+}
+
+type CaseNetRow = { caseNum: string; caseName: string; filedDate: string };
+
+function parseCaseNetRows(html: string, fallbackDate: string): CaseNetRow[] {
+  const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
+  const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+  const cases: CaseNetRow[] = [];
+  const seen = new Set<string>();
+  for (const row of html.match(rowRe) || []) {
+    const cells: string[] = [];
+    let m;
+    while ((m = cellRe.exec(row)) !== null) {
+      cells.push(m[1].replace(/<[^>]+>/g, "").trim());
+    }
+    cellRe.lastIndex = 0;
+    if (cells.length < 2 || !cells[0] || cells[0].toLowerCase().includes("case")) continue;
+    if (seen.has(cells[0])) continue;
+    seen.add(cells[0]);
+    cases.push({ caseNum: cells[0], caseName: cells[1], filedDate: cells[2] || fallbackDate });
+  }
+  return cases;
+}
+
+async function searchCaseNet(
+  countyCode: string,
+  caseType: string,
+  fromDate: string,
+  toDate: string,
+  label: string,
+): Promise<CaseNetRow[]> {
+  const all: CaseNetRow[] = [];
+  const seen = new Set<string>();
+  for (const window of caseNetWeekStarts(fromDate, toDate)) {
+    const body = new URLSearchParams({
+      countyCode,
+      caseType,
+      fromDate: window.from,
+      toDate: window.to,
+      submit: "Search",
+    }).toString();
+    const html = await fetchBlockedPage(CASE_NET_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    const check = validateHtmlResponse(html, `${label} (${window.from}-${window.to})`);
+    if (!check.ok) continue;
+    for (const row of parseCaseNetRows(html, fromDate)) {
+      if (seen.has(row.caseNum)) continue;
+      seen.add(row.caseNum);
+      all.push(row);
+    }
+  }
+  return all;
+}
 
 type TaxSalePdfRow = {
   owner: string;
@@ -400,48 +472,10 @@ async function scrapeJacksonProbate(fromDate: string, toDate: string): Promise<L
   const leads: Lead[] = [];
   const COUNTY = "Jackson";
   try {
-    // Missouri Case.net — public court search
-    // Jackson County = county code 16
-    const url = `https://www.courts.mo.gov/casenet/cases/searchCases.do`;
-    const body = new URLSearchParams({
-      countyCode: "16", // Jackson County
-      caseType: "P", // Probate
-      fromDate: fromDate,
-      toDate: toDate,
-      submit: "Search",
-    }).toString();
+    const url = CASE_NET_URL;
+    const cases = await searchCaseNet("16", "P", fromDate, toDate, "Jackson MO Probate");
+    if (!cases.length) return leads;
 
-    const res = await fetchBlockedPage(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
-    });
-    const check = validateHtmlResponse(res, "Jackson MO Probate");
-    if (!check.ok) return leads;
-
-    const html = res;
-    const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
-    const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-    const rows = html.match(rowRe) || [];
-
-    // Collect all cases first, then batch-lookup assessor in parallel
-    type CaseRow = { caseNum: string; caseName: string; filedDate: string };
-    const cases: CaseRow[] = [];
-    for (const row of rows) {
-      const cells: string[] = [];
-      let m;
-      while ((m = cellRe.exec(row)) !== null) {
-        cells.push(m[1].replace(/<[^>]+>/g, "").trim());
-      }
-      cellRe.lastIndex = 0;
-      if (cells.length < 2 || !cells[0]) continue;
-      const caseNum = cells[0];
-      const caseName = cells[1];
-      const filedDate = cells[2] || fromDate;
-      if (!caseNum || caseNum.toLowerCase().includes("case")) continue;
-      cases.push({ caseNum, caseName, filedDate });
-    }
-    // Parallel assessor lookups — 5 concurrent
     const CONCURRENCY = 5;
     for (let i = 0; i < cases.length; i += CONCURRENCY) {
       const batch = cases.slice(i, i + CONCURRENCY);
@@ -604,37 +638,9 @@ async function scrapePlatteCaseNet(
 ): Promise<Lead[]> {
   const COUNTY = "Platte";
   const leads: Lead[] = [];
-  const url = "https://www.courts.mo.gov/casenet/cases/searchCases.do";
-  const body = new URLSearchParams({
-    countyCode: "25",
-    caseType,
-    fromDate,
-    toDate,
-    submit: "Search",
-  }).toString();
-
-  const html = await fetchBlockedPage(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-  const check = validateHtmlResponse(html, `Platte MO Case.net ${leadType}`);
-  if (!check.ok) return leads;
-
-  const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
-  const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-  for (const row of html.match(rowRe) || []) {
-    const cells: string[] = [];
-    let m;
-    while ((m = cellRe.exec(row)) !== null) {
-      cells.push(m[1].replace(/<[^>]+>/g, "").trim());
-    }
-    cellRe.lastIndex = 0;
-    if (cells.length < 2 || !cells[0] || cells[0].toLowerCase().includes("case")) continue;
-
-    const caseNum = cells[0];
-    const caseName = cells[1];
-    const filedDate = cells[2] || fromDate;
+  const url = CASE_NET_URL;
+  const cases = await searchCaseNet("25", caseType, fromDate, toDate, `Platte MO Case.net ${leadType}`);
+  for (const { caseNum, caseName, filedDate } of cases) {
     leads.push(
       courtCaseToLead({
         county: COUNTY,
@@ -873,6 +879,70 @@ async function scrapeClayCounty(fromDate: string, toDate: string): Promise<Lead[
 }
 
 // ─── PLATTE COUNTY ───────────────────────────────────────────────────────────
+const PLATTE_TAX_URLS = [
+  "https://plattecountycollector.com/taxsale6.php",
+  "https://plattecountycollector.com/taxsale7.php",
+  "https://plattecountycollector.com/taxsale.php",
+];
+
+async function scrapePlatteTaxDelinquent(fromDate: string): Promise<Lead[]> {
+  const leads: Lead[] = [];
+  const COUNTY = "Platte";
+  for (const taxUrl of PLATTE_TAX_URLS) {
+    try {
+      const taxHtml = await fetchBlockedPage(taxUrl);
+      if (!taxHtml || taxHtml.trim().length <= 100) continue;
+      if (/NOT AVAILABLE FOR VIEWING/i.test(taxHtml)) continue;
+      const $ = cheerio.load(taxHtml);
+      let found = 0;
+      $("table tr").each((_, row) => {
+        const cells = $(row)
+          .find("td")
+          .map((__, td) => $(td).text().trim())
+          .get();
+        if (cells.length < 2) return;
+        const owner = cells[0];
+        const address = cells[1] || cells[2];
+        if (!owner || owner.length < 2 || /owner|name|parcel/i.test(owner)) return;
+        found++;
+        leads.push({
+          id: makeId(COUNTY, STATE, "Tax Delinquent", `${owner}-${address}`),
+          county: COUNTY,
+          state: STATE,
+          lead_type: "Tax Delinquent",
+          owner_name: owner,
+          address: address || null,
+          city: "Platte City",
+          zip: null,
+          mailing_address: null,
+          mailing_city: null,
+          mailing_state: null,
+          mailing_zip: null,
+          case_number: cells[2] || null,
+          filing_date: formatDate(fromDate),
+          assessed_value: null,
+          tax_year: new Date().getFullYear().toString(),
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
+          description: `Platte County Tax Delinquent — ${owner}`,
+          source_url: taxUrl,
+          raw_data: JSON.stringify(cells),
+        });
+      });
+      if (found > 0) {
+        console.log(`[Platte MO] tax delinquent: ${found} rows from ${taxUrl}`);
+        return leads;
+      }
+    } catch (e) {
+      console.warn(`[Platte MO] tax URL failed: ${taxUrl}`, e);
+    }
+  }
+  console.warn("[Platte MO] collector tax sale pages empty or offline — no delinquent list published");
+  return leads;
+}
+
 async function scrapePlatteCounty(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
   const COUNTY = "Platte";
@@ -887,52 +957,7 @@ async function scrapePlatteCounty(fromDate: string, toDate: string): Promise<Lea
       }
     }
 
-    try {
-      const taxUrl = "https://plattecountycollector.com/taxsale6.php";
-      const taxHtml = await fetchBlockedPage(taxUrl);
-      if (taxHtml.trim().length <= 100) {
-        console.warn("[Platte MO] tax collector returned empty/blocked HTML");
-      } else {
-        const $ = cheerio.load(taxHtml);
-        $("table tr").each((_, row) => {
-          const cells = $(row)
-            .find("td")
-            .map((__, td) => $(td).text().trim())
-            .get();
-          if (cells.length < 2) return;
-          const owner = cells[0];
-          const address = cells[1] || cells[2];
-          if (!owner || owner.length < 2 || /owner|name|parcel/i.test(owner)) return;
-          leads.push({
-            id: makeId(COUNTY, STATE, "Tax Delinquent", `${owner}-${address}`),
-            county: COUNTY,
-            state: STATE,
-            lead_type: "Tax Delinquent",
-            owner_name: owner,
-            address: address || null,
-            city: "Platte City",
-            zip: null,
-            mailing_address: null,
-            mailing_city: null,
-            mailing_state: null,
-            mailing_zip: null,
-            case_number: cells[2] || null,
-            filing_date: formatDate(fromDate),
-            assessed_value: null,
-            tax_year: new Date().getFullYear().toString(),
-            lender: null,
-            loan_amount: null,
-            sale_date: null,
-            sale_amount: null,
-            description: `Platte County Tax Delinquent — ${owner}`,
-            source_url: taxUrl,
-            raw_data: JSON.stringify(cells),
-          });
-        });
-      }
-    } catch (e) {
-      console.warn("[Platte MO] tax collector error:", e);
-    }
+    leads.push(...(await scrapePlatteTaxDelinquent(fromDate)));
 
     const fsboSearches = [
       "https://kansascity.craigslist.org/search/rea?query=platte&purveyor=owner",
@@ -1226,39 +1251,10 @@ async function scrapeLisPendens(fromDate: string, toDate: string): Promise<Lead[
     { name: "Cass", code: "7", city: "Harrisonville" },
     { name: "Platte", code: "25", city: "Platte City" },
   ];
-  const url = `https://www.courts.mo.gov/casenet/cases/searchCases.do`;
+  const url = CASE_NET_URL;
   for (const { name, code } of counties) {
     try {
-      const body = new URLSearchParams({
-        countyCode: code,
-        caseType: "L",
-        fromDate,
-        toDate,
-        submit: "Search",
-      }).toString();
-      const html = await fetchBlockedPage(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body,
-      });
-      const lisCheck = validateHtmlResponse(html, `${name} MO Lis Pendens`);
-      if (!lisCheck.ok) continue;
-      const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
-      const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-      const rows = html.match(rowRe) || [];
-      type CaseRow = { caseNum: string; caseName: string; filedDate: string };
-      const cases: CaseRow[] = [];
-      for (const row of rows) {
-        const cells: string[] = [];
-        let m;
-        while ((m = cellRe.exec(row)) !== null) {
-          cells.push(m[1].replace(/<[^>]+>/g, "").trim());
-        }
-        cellRe.lastIndex = 0;
-        if (cells.length < 2 || !cells[0] || cells[0].toLowerCase().includes("case")) continue;
-        cases.push({ caseNum: cells[0], caseName: cells[1], filedDate: cells[2] || fromDate });
-      }
-      // Batch assessor enrichment — 5 concurrent
+      const cases = await searchCaseNet(code, "L", fromDate, toDate, `${name} MO Lis Pendens`);
       const CONCURRENCY = 5;
       for (let i = 0; i < cases.length; i += CONCURRENCY) {
         const batch = cases.slice(i, i + CONCURRENCY);
@@ -1318,39 +1314,10 @@ async function scrapeMOProbate(fromDate: string, toDate: string): Promise<Lead[]
     { name: "Cass", code: "7", city: "Harrisonville" },
     { name: "Platte", code: "25", city: "Platte City" },
   ];
-  const url = `https://www.courts.mo.gov/casenet/cases/searchCases.do`;
+  const url = CASE_NET_URL;
   for (const { name, code, city } of counties) {
     try {
-      const body = new URLSearchParams({
-        countyCode: code,
-        caseType: "P",
-        fromDate,
-        toDate,
-        submit: "Search",
-      }).toString();
-      const html = await fetchBlockedPage(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body,
-      });
-      const probateCheck = validateHtmlResponse(html, `${name} MO Probate`);
-      if (!probateCheck.ok) continue;
-      const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
-      const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-      const rows = html.match(rowRe) || [];
-      type CaseRow = { caseNum: string; caseName: string; filedDate: string };
-      const cases: CaseRow[] = [];
-      for (const row of rows) {
-        const cells: string[] = [];
-        let m;
-        while ((m = cellRe.exec(row)) !== null) {
-          cells.push(m[1].replace(/<[^>]+>/g, "").trim());
-        }
-        cellRe.lastIndex = 0;
-        if (cells.length < 2 || !cells[0] || cells[0].toLowerCase().includes("case")) continue;
-        cases.push({ caseNum: cells[0], caseName: cells[1], filedDate: cells[2] || fromDate });
-      }
-      // Batch assessor enrichment — 5 concurrent, only keep leads with a found property
+      const cases = await searchCaseNet(code, "P", fromDate, toDate, `${name} MO Probate`);
       const CONCURRENCY = 5;
       for (let i = 0; i < cases.length; i += CONCURRENCY) {
         const batch = cases.slice(i, i + CONCURRENCY);
@@ -1408,39 +1375,10 @@ async function scrapeMODivorce(fromDate: string, toDate: string): Promise<Lead[]
     { name: "Cass", code: "7", city: "Harrisonville" },
     { name: "Platte", code: "25", city: "Platte City" },
   ];
-  const url = `https://www.courts.mo.gov/casenet/cases/searchCases.do`;
+  const url = CASE_NET_URL;
   for (const { name, code, city } of counties) {
     try {
-      const body = new URLSearchParams({
-        countyCode: code,
-        caseType: "D",
-        fromDate,
-        toDate,
-        submit: "Search",
-      }).toString();
-      const html = await fetchBlockedPage(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body,
-      });
-      const divCheck = validateHtmlResponse(html, `${name} MO Divorce`);
-      if (!divCheck.ok) continue;
-      const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
-      const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-      const rows = html.match(rowRe) || [];
-      type DivorceRow = { caseNum: string; caseName: string; filedDate: string };
-      const cases: DivorceRow[] = [];
-      for (const row of rows) {
-        const cells: string[] = [];
-        let m;
-        while ((m = cellRe.exec(row)) !== null) {
-          cells.push(m[1].replace(/<[^>]+>/g, "").trim());
-        }
-        cellRe.lastIndex = 0;
-        if (cells.length < 2 || !cells[0] || cells[0].toLowerCase().includes("case")) continue;
-        cases.push({ caseNum: cells[0], caseName: cells[1], filedDate: cells[2] || fromDate });
-      }
-      // Batch assessor enrichment — 5 concurrent, only keep leads with a found property
+      const cases = await searchCaseNet(code, "D", fromDate, toDate, `${name} MO Divorce`);
       const CONCURRENCY = 5;
       for (let i = 0; i < cases.length; i += CONCURRENCY) {
         const batch = cases.slice(i, i + CONCURRENCY);

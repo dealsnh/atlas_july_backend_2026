@@ -16,6 +16,7 @@ import {
   settleScraperResults,
   courtCaseToLead,
   validateHtmlResponse,
+  toUsDate,
 } from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
 import {
@@ -101,11 +102,110 @@ async function fetchAlaCourtHtml(url: string): Promise<string> {
   const html = await fetchBlockedPage(url);
   const check = validateHtmlResponse(html, "AlaCourt", 800);
   if (!check.ok) return "";
+  if (/frmlogin\.aspx/i.test(html)) {
+    console.warn("[AlaCourt] redirected to login");
+    return "";
+  }
   if (!/<td/i.test(html)) {
     console.warn("[AlaCourt] response has no table cells");
     return "";
   }
   return html;
+}
+
+function alaCourtSearchUrl(
+  county: string,
+  caseType: string,
+  fromDate: string,
+  toDate: string,
+): string {
+  return `https://v2.alacourt.com/frmPublicCaseSearch.aspx?county=${encodeURIComponent(county)}&caseType=${caseType}&fromDate=${encodeURIComponent(toUsDate(fromDate))}&toDate=${encodeURIComponent(toUsDate(toDate))}`;
+}
+
+const CAPTURECAMA_TENANTS: Record<string, string> = {
+  Autauga: "https://autauga.capturecama.com",
+};
+const CAPTURECAMA_EXPRESS = "https://prodexpress.capturecama.com";
+
+async function scrapeCaptureCamaDelinquent(county: string, fromDate: string): Promise<Lead[]> {
+  const tenantUrl = CAPTURECAMA_TENANTS[county];
+  if (!tenantUrl) return [];
+  const headers = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    "Referring-Page": `${tenantUrl}/DelqSearch`,
+  };
+  const baseBody = { tenantUrl, expressUrl: CAPTURECAMA_EXPRESS, reserved: 0 };
+  try {
+    const yearsRes = await fetchWithRetry(`${CAPTURECAMA_EXPRESS}/GetDelqSearchYears`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(baseBody),
+    });
+    if (!yearsRes.ok) return [];
+    const years: Array<{ RecordYear: string | number }> = await yearsRes.json();
+    let rows: Array<Record<string, unknown>> = [];
+    let usedYear = "";
+    for (const y of years) {
+      const recordYear = String(y.RecordYear);
+      const searchRes = await fetchWithRetry(`${CAPTURECAMA_EXPRESS}/SearchDelq`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          searchstring: "",
+          searchtype: "4",
+          recordyear: recordYear,
+        }),
+      });
+      if (!searchRes.ok) continue;
+      const data = (await searchRes.json()) as Array<Record<string, unknown>>;
+      if (data.length) {
+        rows = data;
+        usedYear = recordYear;
+        break;
+      }
+    }
+    if (!rows.length) return [];
+
+    return rows.map((row) => {
+      const owner = String(row.Name1 || "").trim();
+      const address = String(row.PropAddr1 || row.Address1 || "").trim() || null;
+      const city =
+        String(row.PropCity || row.City || AL_COUNTY_CITIES[county] || "").trim() || null;
+      const zipRaw = String(row.PropZip || row.Zip || "").trim();
+      const zip = zipRaw.slice(0, 5) || null;
+      const parcel = String(row.ParcelNo || "").trim();
+      return {
+        id: makeId(parcel || owner, county, "AL", "tax"),
+        county,
+        state: "AL",
+        lead_type: "Tax Delinquent",
+        owner_name: owner || null,
+        address,
+        city,
+        zip,
+        mailing_address: String(row.Address1 || "").trim() || null,
+        mailing_city: String(row.City || "").trim() || null,
+        mailing_state: "AL",
+        mailing_zip: String(row.Zip || "").trim().slice(0, 5) || null,
+        case_number: parcel || null,
+        filing_date: formatDate(fromDate),
+        assessed_value: row.TotalValue != null ? String(row.TotalValue) : null,
+        tax_year: usedYear || new Date().getFullYear().toString(),
+        lender: null,
+        loan_amount: null,
+        sale_date: null,
+        sale_amount: row.CurrAmtDue != null ? String(row.CurrAmtDue) : null,
+        description: `Tax delinquent — ${county} County AL — ${owner || parcel}`,
+        source_url: `${tenantUrl}/DelqSearch`,
+        raw_data: JSON.stringify(row),
+      };
+    });
+  } catch (e) {
+    console.error(`[${county} AL] CaptureCAMA delinquent error:`, e);
+    return [];
+  }
 }
 
 // ─── Pre-Foreclosure via AlaCourt public search ───────────────────────────────
@@ -116,7 +216,7 @@ async function scrapePreForeclosure(
 ): Promise<Lead[]> {
   const leads: Lead[] = [];
   try {
-    const url = `https://v2.alacourt.com/frmPublicCaseSearch.aspx?county=${encodeURIComponent(county)}&caseType=CV&fromDate=${fromDate}&toDate=${toDate}`;
+    const url = alaCourtSearchUrl(county, "CV", fromDate, toDate);
     const html = await fetchAlaCourtHtml(url);
 
     // Simple regex parse for case rows (AlaCourt uses tables)
@@ -318,6 +418,10 @@ async function scrapeTaxDelinquent(
   if (county === "Madison") {
     const madison = await scrapeMadisonTaxDelinquent(fromDate, toDate);
     if (madison.length) return madison;
+  }
+  if (CAPTURECAMA_TENANTS[county]) {
+    const capture = await scrapeCaptureCamaDelinquent(county, fromDate);
+    if (capture.length) return capture;
   }
   const leads: Lead[] = [];
   const urls: Record<string, string> = {
@@ -758,7 +862,7 @@ export async function scrapeProbate(
 ): Promise<Lead[]> {
   const leads: Lead[] = [];
   try {
-    const url = `https://v2.alacourt.com/frmPublicCaseSearch.aspx?county=${encodeURIComponent(county)}&caseType=PR&fromDate=${fromDate}&toDate=${toDate}`;
+    const url = alaCourtSearchUrl(county, "PR", fromDate, toDate);
     const html = await fetchAlaCourtHtml(url);
     if (!html) return leads;
     const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || [];
@@ -1092,7 +1196,7 @@ export async function scrapeDivorce(fromDate: string, toDate: string): Promise<L
   const counties = ["Jefferson", "Madison", "Montgomery", "Morgan", "Shelby", "Limestone"];
   for (const county of counties) {
     try {
-      const url = `https://v2.alacourt.com/frmPublicCaseSearch.aspx?county=${encodeURIComponent(county)}&caseType=DR&fromDate=${fromDate}&toDate=${toDate}`;
+      const url = alaCourtSearchUrl(county, "DR", fromDate, toDate);
       const res = await fetchWithRetry(url, { headers: { "User-Agent": "Mozilla/5.0" } });
       if (!res.ok) continue;
       const html = await res.text();
