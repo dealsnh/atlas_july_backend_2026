@@ -158,6 +158,9 @@ async function scrapeSheriffSales(fromDate: string, toDate: string): Promise<Lea
 
 // ─── Tax Delinquent via Hamilton County Auditor XLSX ─────────────────────────
 // CONFIRMED WORKING: hcauditor.org/download/Delinquent/unpaid.xlsx (updated monthly)
+// Full XLSX has ~28k rows — cap per run for daily pipeline performance (still >> old 100 cap)
+const HAMILTON_TAX_MAX_ROWS = 500;
+
 async function scrapeTaxDelinquent(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
   const sourceUrl = "https://www.hcauditor.org/download/Delinquent/unpaid.xlsx";
@@ -170,7 +173,12 @@ async function scrapeTaxDelinquent(fromDate: string, toDate: string): Promise<Le
     const wb = XLSX.read(buf, { type: "buffer" });
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json<Record<string, string | number>>(sheet);
-    for (const row of rows) {
+    const sorted = [...rows].sort((a, b) => {
+      const av = Number(a.unpaid_amount) || 0;
+      const bv = Number(b.unpaid_amount) || 0;
+      return bv - av;
+    });
+    for (const row of sorted.slice(0, HAMILTON_TAX_MAX_ROWS)) {
       const parcel = String(row.parcel_number || "").trim();
       const owner1 = String(row.owner_name_1 || "").trim();
       const owner2 = String(row.owner_name_2 || "").trim();

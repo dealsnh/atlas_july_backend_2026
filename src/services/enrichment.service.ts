@@ -41,6 +41,8 @@ function dbLeadToScraperLead(row: DbLead): Lead {
 }
 
 const CONCURRENCY = 5;
+/** Assessor calls capped per batch so large county dumps do not block the pipeline. */
+const MAX_ENRICH_PER_BATCH = 250;
 
 /** Valid situs street line — rejects Craigslist marketing copy used as address. */
 export function isValidStreetAddress(address: string | null | undefined): boolean {
@@ -282,14 +284,20 @@ export async function enrichLeads(
 ): Promise<Lead[]> {
   if (!leads.length) return leads;
 
-  onProgress?.(`Enriching ${leads.length} leads via county assessor (best-effort)...`);
+  const toEnrich = leads.length > MAX_ENRICH_PER_BATCH ? leads.slice(0, MAX_ENRICH_PER_BATCH) : leads;
+  const passthrough = leads.length > MAX_ENRICH_PER_BATCH ? leads.slice(MAX_ENRICH_PER_BATCH) : [];
+
+  onProgress?.(
+    `Enriching ${toEnrich.length} leads via county assessor (best-effort)${passthrough.length ? ` — ${passthrough.length} passed through without assessor` : ""}...`,
+  );
 
   const results: Lead[] = [];
-  for (let i = 0; i < leads.length; i += CONCURRENCY) {
-    const batch = leads.slice(i, i + CONCURRENCY);
+  for (let i = 0; i < toEnrich.length; i += CONCURRENCY) {
+    const batch = toEnrich.slice(i, i + CONCURRENCY);
     const enriched = await Promise.all(batch.map(enrichOne));
     results.push(...enriched);
   }
+  results.push(...passthrough);
 
   const saveable = results.filter(isLeadSaveable).length;
   const complete = results.filter((l) => enrichmentStatus(l) === "complete").length;
