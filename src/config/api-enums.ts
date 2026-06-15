@@ -23,7 +23,7 @@ export const LEAD_TYPES = [
 ] as const;
 export type LeadType = (typeof LEAD_TYPES)[number];
 
-export const US_STATE_CODES = ["MO", "WI", "AL", "OH", "SC", "TX", "NY", "GA", "FL"] as const;
+export const US_STATE_CODES = ["MO", "AL", "OH", "TX", "NY", "GA", "FL"] as const;
 export type UsStateCode = (typeof US_STATE_CODES)[number];
 
 export const SCRAPE_RUN_STATUSES = ["running", "success", "error"] as const;

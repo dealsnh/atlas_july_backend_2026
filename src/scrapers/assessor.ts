@@ -593,86 +593,6 @@ async function lookupHamiltonOH(ownerName: string): Promise<AssessorProperty[]> 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Wisconsin Counties
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function lookupDaneWI(ownerName: string): Promise<AssessorProperty[]> {
-  try {
-    const { last } = parseName(ownerName);
-    const html = await getText(
-      `https://landonline.countyofdane.com/LandRecords/protected/LRSearch.aspx?searchType=owner&ownerName=${encodeURIComponent(last)}`,
-    );
-    return parseGenericTable(html, "WI", "Dane County", 2, 3);
-  } catch {
-    return [];
-  }
-}
-
-async function lookupRockWI(ownerName: string): Promise<AssessorProperty[]> {
-  try {
-    const { last } = parseName(ownerName);
-    const html = await getTextRendered(
-      `https://qpublic.schneidercorp.com/Application.aspx?AppID=1017&LayerID=20421&PageTypeID=4&PageID=9494&KeyValue=${encodeURIComponent(last)}`,
-    );
-    return parseQPublicResults(html, "WI");
-  } catch {
-    return [];
-  }
-}
-
-async function lookupDoorWI(ownerName: string): Promise<AssessorProperty[]> {
-  try {
-    const { last } = parseName(ownerName);
-    const html = await getTextRendered(
-      `https://qpublic.schneidercorp.com/Application.aspx?AppID=1060&LayerID=21426&PageTypeID=4&PageID=9872&KeyValue=${encodeURIComponent(last)}`,
-    );
-    return parseQPublicResults(html, "WI");
-  } catch {
-    return [];
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// South Carolina Counties
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function lookupHorrySC(ownerName: string): Promise<AssessorProperty[]> {
-  try {
-    const { last } = parseName(ownerName);
-    const html = await getTextRendered(
-      `https://www.horrycountysc.gov/departments/assessor/property-search/?owner=${encodeURIComponent(last)}`,
-    );
-    return parseGenericTable(html, "SC", "Horry County", 2, 3);
-  } catch {
-    return [];
-  }
-}
-
-async function lookupGeorgetownSC(ownerName: string): Promise<AssessorProperty[]> {
-  try {
-    const { last } = parseName(ownerName);
-    const html = await getTextRendered(
-      `https://qpublic.schneidercorp.com/Application.aspx?AppID=830&LayerID=14957&PageTypeID=4&PageID=7084&KeyValue=${encodeURIComponent(last)}`,
-    );
-    return parseQPublicResults(html, "SC");
-  } catch {
-    return [];
-  }
-}
-
-async function lookupMarionSC(ownerName: string): Promise<AssessorProperty[]> {
-  try {
-    const { last } = parseName(ownerName);
-    const html = await getTextRendered(
-      `https://esearch.marioncountysc.com/search/result?keywords=OwnerName%3A%22${encodeURIComponent(last)}%22`,
-    );
-    return parseEsearchResults(html, "SC");
-  } catch {
-    return [];
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // New York Counties
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -858,12 +778,6 @@ export type CountyKey =
   | "elmore-al"
   | "montgomery-al"
   | "hamilton-oh"
-  | "dane-wi"
-  | "rock-wi"
-  | "door-wi"
-  | "horry-sc"
-  | "georgetown-sc"
-  | "marion-sc"
   | "suffolk-ny"
   | "bexar-tx"
   | "nueces-tx"
@@ -885,12 +799,6 @@ const LOOKUP_MAP: Record<CountyKey, (name: string) => Promise<AssessorProperty[]
   "elmore-al": lookupMontgomeryAL,
   "montgomery-al": lookupMontgomeryAL,
   "hamilton-oh": lookupHamiltonOH,
-  "dane-wi": lookupDaneWI,
-  "rock-wi": lookupRockWI,
-  "door-wi": lookupDoorWI,
-  "horry-sc": lookupHorrySC,
-  "georgetown-sc": lookupGeorgetownSC,
-  "marion-sc": lookupMarionSC,
   "suffolk-ny": lookupSuffolkNY,
   "bexar-tx": lookupBexarTX,
   "nueces-tx": lookupNuecesT,
@@ -898,83 +806,6 @@ const LOOKUP_MAP: Record<CountyKey, (name: string) => Promise<AssessorProperty[]
   "jim-wells-tx": lookupJimWellsTX,
   "san-patricio-tx": lookupSanPatricioTX,
 };
-
-const QPUBLIC_ADDRESS: Record<
-  string,
-  { appId: string; layerId: string; pageId: string; state: string }
-> = {
-  "rock-wi": { appId: "1017", layerId: "20421", pageId: "9494", state: "WI" },
-  "door-wi": { appId: "1060", layerId: "21426", pageId: "9872", state: "WI" },
-  "georgetown-sc": { appId: "830", layerId: "14957", pageId: "7084", state: "SC" },
-};
-
-async function lookupAddressByCountyPortal(
-  countyKey: string,
-  state: string,
-  address: string,
-  streetNum: string,
-  streetName: string,
-): Promise<AssessorProperty | null> {
-  const key = `${countyKey}-${state.toLowerCase()}`;
-  const qcfg = QPUBLIC_ADDRESS[key];
-  if (qcfg) {
-    try {
-      const streetPart = address.trim().split(",")[0];
-      const html = await getTextRendered(
-        `https://qpublic.schneidercorp.com/Application.aspx?AppID=${qcfg.appId}&LayerID=${qcfg.layerId}&PageTypeID=4&PageID=${qcfg.pageId}&KeyValue=${encodeURIComponent(streetPart)}`,
-      );
-      const results = parseQPublicResults(html, qcfg.state);
-      const match =
-        results.find((r) =>
-          r.address?.toLowerCase().includes(`${streetNum} ${streetName}`.toLowerCase()),
-        ) ?? results[0];
-      return match ?? null;
-    } catch {
-      /* fall through */
-    }
-  }
-
-  if (countyKey === "dane" && state === "WI") {
-    try {
-      const streetPart = address.trim().split(",")[0];
-      const html = await getText(
-        `https://landonline.countyofdane.com/LandRecords/protected/LRSearch.aspx?searchType=address&address=${encodeURIComponent(streetPart)}`,
-      );
-      const results = parseGenericTable(html, "WI", "Dane County", 2, 3);
-      return results[0] ?? null;
-    } catch {
-      return null;
-    }
-  }
-
-  if (countyKey === "horry" && state === "SC") {
-    try {
-      const streetPart = address.trim().split(",")[0];
-      const html = await getTextRendered(
-        `https://www.horrycountysc.gov/departments/assessor/property-search/?address=${encodeURIComponent(streetPart)}`,
-      );
-      const results = parseGenericTable(html, "SC", "Horry County", 2, 3);
-      return results[0] ?? null;
-    } catch {
-      return null;
-    }
-  }
-
-  if (countyKey === "marion" && state === "SC") {
-    try {
-      const streetPart = address.trim().split(",")[0];
-      const html = await getTextRendered(
-        `https://esearch.marioncountysc.com/search/result?keywords=SiteAddress%3A%22${encodeURIComponent(streetPart)}%22`,
-      );
-      const results = parseEsearchResults(html, "SC");
-      return results[0] ?? null;
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
-}
 
 /**
  * Look up the owner of a property by street address in a given county.
@@ -1118,12 +949,6 @@ export async function lookupByAddress(
           }
         }
       }
-    } else if (state === "WI") {
-      const match = await lookupAddressByCountyPortal(countyKey, "WI", address, streetNum, streetName);
-      if (match) return match;
-    } else if (state === "SC") {
-      const match = await lookupAddressByCountyPortal(countyKey, "SC", address, streetNum, streetName);
-      if (match) return match;
     }
   } catch {
     // enrichment is best-effort, silently fail

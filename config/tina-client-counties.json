@@ -65,35 +65,5 @@
     "name": "Elmore",
     "state": "AL",
     "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"]
-  },
-  {
-    "name": "Horry",
-    "state": "SC",
-    "lead_types": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "Foreclosure"]
-  },
-  {
-    "name": "Georgetown",
-    "state": "SC",
-    "lead_types": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "Foreclosure"]
-  },
-  {
-    "name": "Marion",
-    "state": "SC",
-    "lead_types": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "Foreclosure"]
-  },
-  {
-    "name": "Dane",
-    "state": "WI",
-    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "FSBO"]
-  },
-  {
-    "name": "Rock",
-    "state": "WI",
-    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "FSBO"]
-  },
-  {
-    "name": "Door",
-    "state": "WI",
-    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "FSBO"]
   }
 ]

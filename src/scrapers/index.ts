@@ -2,10 +2,8 @@
 import { unionLeadTypes } from "../config/county-lead-types.js";
 import { Lead, CountyConfig } from "./base.js";
 import * as missouri from "./missouri.js";
-import * as wisconsin from "./wisconsin.js";
 import * as alabama from "./alabama.js";
 import * as ohio from "./ohio.js";
-import * as southCarolina from "./south_carolina.js";
 import { scrapePublicSearchLeads } from "./publicsearch-leads.js";
 
 const STATE_WIDE_TIMEOUT_MS = 90_000;
@@ -91,52 +89,6 @@ function stateWideScrapers(
       ],
     ];
   }
-  if (state === "SC") {
-    return [
-      ["SC Bankruptcy", "Bankruptcy", () => southCarolina.scrapeBankruptcy(fromDate, toDate)],
-      ["SC Obituaries", "Obituary", () => southCarolina.scrapeObituaries(fromDate, toDate)],
-      ["SC FSBO", "FSBO", () => southCarolina.scrapeFSBO(fromDate, toDate)],
-      [
-        "SC Code Violations",
-        "Code Violation",
-        () => southCarolina.scrapeCodeViolations(fromDate, toDate),
-      ],
-      ["SC Divorce/Eviction", "Divorce", () => southCarolina.scrapeDivorce(fromDate, toDate)],
-      [
-        "SC Out-of-State Owners",
-        "Out-of-State Owner",
-        () => southCarolina.scrapeOutOfStateOwners(fromDate, toDate),
-      ],
-      [
-        "SC Vacant/Abandoned",
-        "Vacant/Abandoned",
-        () => southCarolina.scrapeVacantAbandoned(fromDate, toDate),
-      ],
-    ];
-  }
-  if (state === "WI") {
-    return [
-      ["WI Obituaries", "Obituary", () => wisconsin.scrapeObituaries(fromDate, toDate)],
-      ["WI FSBO", "FSBO", () => wisconsin.scrapeFSBO(fromDate, toDate)],
-      ["WI Bankruptcy", "Bankruptcy", () => wisconsin.scrapeBankruptcy(fromDate, toDate)],
-      [
-        "WI Code Violations",
-        "Code Violation",
-        () => wisconsin.scrapeCodeViolations(fromDate, toDate),
-      ],
-      ["WI Divorce/Eviction", "Divorce", () => wisconsin.scrapeDivorce(fromDate, toDate)],
-      [
-        "WI Out-of-State Owners",
-        "Out-of-State Owner",
-        () => wisconsin.scrapeOutOfStateOwners(fromDate, toDate),
-      ],
-      [
-        "WI Vacant/Abandoned",
-        "Vacant/Abandoned",
-        () => wisconsin.scrapeVacantAbandoned(fromDate, toDate),
-      ],
-    ];
-  }
   return [];
 }
 
@@ -204,38 +156,6 @@ export async function runAllScrapers(
       continue;
     }
 
-    if (state === "WI") {
-      for (const county of stateCounties) {
-        const name = countyName(county);
-        const types = county.leadTypes ?? [];
-        try {
-          onProgress?.(`Scraping ${name}, WI (${types.join(", ")})...`);
-          const leads = await wisconsin.scrapeCounty(name, fromDate, toDate, types, errors);
-          allLeads.push(...leads);
-          stateLeads.push(...leads);
-          onProgress?.(`✓ ${name} WI: ${leads.length} leads`);
-        } catch (e) {
-          const msg = `Error scraping ${name} WI: ${(e as Error).message}`;
-          errors.push(msg);
-          onProgress?.(`✗ ${msg}`);
-        }
-      }
-
-      const beforeWide = stateLeads.length;
-      await runConfiguredStateWideScrapers(
-        state,
-        stateCounties,
-        fromDate,
-        toDate,
-        onProgress,
-        errors,
-        stateLeads,
-      );
-      allLeads.push(...stateLeads.slice(beforeWide));
-      if (stateLeads.length) await onLeadsBatch?.(stateLeads);
-      continue;
-    }
-
     for (const county of stateCounties) {
       const name = countyName(county);
       const types = county.leadTypes ?? [];
@@ -247,8 +167,6 @@ export async function runAllScrapers(
           leads = await alabama.scrapeAlabama(name, fromDate, toDate, types, errors);
         } else if (state === "OH") {
           leads = await ohio.scrapeOhio(name, fromDate, toDate, types, errors);
-        } else if (state === "SC") {
-          leads = await southCarolina.scrapeSC(name, fromDate, toDate, types, errors);
         } else {
           const msg = `No scraper registered for ${name}, ${county.state}`;
           errors.push(msg);

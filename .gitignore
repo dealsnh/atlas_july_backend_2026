@@ -67,6 +67,9 @@ web_modules/
 # Yarn Integrity file
 .yarn-integrity
 
+# Generated county status reports
+reports/
+
 # dotenv environment variable files
 .env
 .env.*

@@ -24,12 +24,6 @@ export const COUNTY_DEFAULT_LEAD_TYPES: Record<string, readonly string[]> = {
   "AL:Montgomery": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],
   "AL:Autauga": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],
   "AL:Elmore": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],
-  "SC:Horry": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "Foreclosure"],
-  "SC:Georgetown": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "Foreclosure"],
-  "SC:Marion": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "Foreclosure"],
-  "WI:Dane": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "FSBO"],
-  "WI:Rock": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "FSBO"],
-  "WI:Door": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "FSBO"],
 };
 
 const LEAD_TYPE_ALIASES: Record<string, string> = {
