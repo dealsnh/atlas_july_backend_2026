@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { resolveCountyLeadTypes } from "../config/county-lead-types.js";
+import { resolveCountyLeadTypes, leadMatchesRequestedType } from "../config/county-lead-types.js";
 import { clientConfig } from "../config/constants.js";
 import { env } from "../config/env.js";
 import {
@@ -21,7 +21,7 @@ import {
 import { getDateRange, runAllScrapers } from "../scrapers/index.js";
 import type { CountyConfig } from "../scrapers/base.js";
 import { logger } from "../utils/logger.js";
-import { enrichLeads, isLeadSaveable } from "./enrichment.service.js";
+import { enrichLeads, enrichmentStatus, isLeadSaveable } from "./enrichment.service.js";
 import { sendDailyReport } from "./email.service.js";
 import { getEmailRecipients, getRawSettings, isSmtpReady } from "./settings.service.js";
 
@@ -76,16 +76,21 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
   const saveBatch = async (batch: Parameters<typeof enrichLeads>[0]): Promise<void> => {
     if (!batch.length) return;
 
+    // 1. Persist every scraped row to raw_leads immediately (pre-enrichment snapshot)
     for (const lead of batch) {
       await upsertRawLead(runId, lead);
     }
 
+    // 2. Best-effort enrichment — never blocks promotion
     const enriched = await enrichLeads(batch, (msg) => {
       lastScrapeLog.push(msg);
       logger.info({ msg }, "Enrichment progress");
     });
+
     let batchNew = 0;
     let batchSkipped = 0;
+    let batchPartial = 0;
+
     for (const lead of enriched) {
       if (savedIds.has(lead.id)) {
         await finalizeRawLead(runId, lead, {
@@ -94,6 +99,7 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
         });
         continue;
       }
+
       if (!isLeadSaveable(lead)) {
         batchSkipped++;
         await finalizeRawLead(runId, lead, {
@@ -102,6 +108,9 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
         });
         continue;
       }
+
+      if (enrichmentStatus(lead) === "partial") batchPartial++;
+
       const isNew = await insertLeadIfNotExists(lead as unknown as Record<string, string | null>);
       if (isNew) {
         totalNew++;
@@ -115,11 +124,14 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
         });
       }
     }
+
     if (batchNew > 0) {
-      lastScrapeLog.push(`✓ ${batchNew} leads saved to DB (${totalNew} total)`);
+      lastScrapeLog.push(
+        `✓ ${batchNew} leads saved to DB (${totalNew} total${batchPartial ? `, ${batchPartial} partial enrichment` : ""})`,
+      );
     }
     if (batchSkipped > 0) {
-      lastScrapeLog.push(`⚠ Skipped ${batchSkipped} leads — incomplete after enrichment`);
+      lastScrapeLog.push(`⚠ ${batchSkipped} rows lacked minimum identity + location`);
     }
   };
 
@@ -260,12 +272,13 @@ export async function validateCountyScrape(params: {
   const countyNorm = params.county.toLowerCase();
   let filtered = leads.filter((l) => {
     if (l.county.toLowerCase() !== countyNorm) return false;
-    if (params.lead_type && l.lead_type !== params.lead_type) return false;
+    if (params.lead_type && !leadMatchesRequestedType(l.lead_type, [params.lead_type])) return false;
     return true;
   });
-  // Scrapers already run inline assessor enrichment; avoid re-enriching hundreds in QA.
   if (!filtered.some((l) => isLeadSaveable(l))) {
-    filtered = await enrichLeads(filtered.slice(0, 25));
+    filtered = await enrichLeads(filtered.slice(0, 50));
+  } else {
+    filtered = await enrichLeads(filtered);
   }
 
   const by_type: Record<string, number> = {};

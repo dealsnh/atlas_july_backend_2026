@@ -45,7 +45,7 @@ const CONCURRENCY = 5;
 /** Valid situs street line — rejects Craigslist marketing copy used as address. */
 export function isValidStreetAddress(address: string | null | undefined): boolean {
   const a = (address || "").trim();
-  if (a.length < 5 || a.length > 120) return false;
+  if (a.length < 5 || a.length > 200) return false;
   if (!/^\d+/.test(a)) return false;
   if (a.split(/\s+/).length > 14) return false;
   if (/^\d+\s+unit\b/i.test(a)) return false;
@@ -56,6 +56,86 @@ export function isValidStreetAddress(address: string | null | undefined): boolea
     );
   if (!hasStreetSuffix && a.split(/\s+/).length > 6) return false;
   return true;
+}
+
+/** Legal description, partial street, or other property location text. */
+export function isLegalOrPartialAddress(text: string | null | undefined): boolean {
+  const a = (text || "").trim();
+  if (a.length < 5 || a.length > 300) return false;
+  if (isValidStreetAddress(a)) return true;
+  if (
+    /\b(lot|block|parcel|tract|subdivision|legal|sec|section|acres?|unit|platted|estate)\b/i.test(a)
+  ) {
+    return true;
+  }
+  // Partial street without number (e.g. "ALLEN AVE")
+  if (/^[A-Za-z0-9][A-Za-z0-9\s.'-]{2,79}$/.test(a) && /[A-Za-z]{2,}/.test(a)) return true;
+  return false;
+}
+
+function leadLocationCandidates(lead: Lead): string[] {
+  const out: string[] = [];
+  if (lead.address?.trim()) out.push(lead.address.trim());
+  if (lead.description?.trim()) out.push(lead.description.trim());
+  if (lead.raw_data) {
+    try {
+      const raw = JSON.parse(lead.raw_data) as Record<string, string>;
+      for (const key of ["detailAddress", "title", "location", "address"]) {
+        if (raw[key]?.trim()) out.push(raw[key].trim());
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return out;
+}
+
+/** Property address, legal description, or partial location from address/description. */
+export function hasUsablePropertyLocation(lead: Lead): boolean {
+  for (const text of leadLocationCandidates(lead)) {
+    const normalized = text.replace(/[—–]/g, "-").trim();
+    if (isLegalOrPartialAddress(normalized)) return true;
+    if (
+      normalized.length >= 10 &&
+      /county.*(probate|lis pendens|foreclosure|sheriff|tax|estate)/i.test(normalized)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Owner name, case number, or court-style case name in description. */
+export function hasUsableIdentity(lead: Lead): boolean {
+  const name = (lead.owner_name || "").trim();
+  if (name.length >= 2 && !isPlaceholderOwner(name)) return true;
+
+  const caseNum = (lead.case_number || "").trim();
+  if (caseNum.length >= 3) return true;
+
+  const desc = (lead.description || "").trim();
+  if (desc.length >= 8 && /\b(v\.|vs\.|estate|probate|foreclos|deceased|in re)\b/i.test(desc)) {
+    return true;
+  }
+  if (desc.length >= 10 && /county.*(probate|lis pendens|foreclosure|sheriff|tax)/i.test(desc)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Phase 1 save gate: identity + property location required; mailing is optional enrichment.
+ */
+export function isLeadSaveable(lead: Lead): boolean {
+  return hasUsableIdentity(lead) && hasUsablePropertyLocation(lead);
+}
+
+/** complete = street address + real owner; partial = saved but missing enriched fields. */
+export function enrichmentStatus(lead: Lead): "complete" | "partial" {
+  const hasOwner = (lead.owner_name || "").trim().length >= 2 && !isPlaceholderOwner(lead.owner_name);
+  const hasStreet = isValidStreetAddress(lead.address);
+  return hasOwner && hasStreet ? "complete" : "partial";
 }
 
 function hasMailingAddress(lead: Lead): boolean {
@@ -81,19 +161,9 @@ function addressVariants(addr: string): string[] {
 
 function needsEnrichment(lead: Lead): boolean {
   const missingOwner = isPlaceholderOwner(lead.owner_name);
-  const missingAddress = !isValidStreetAddress(lead.address);
+  const missingStreet = !isValidStreetAddress(lead.address);
   const missingMailing = !hasMailingAddress(lead);
-  return missingOwner || missingAddress || missingMailing;
-}
-
-/** Client requirement: owner name + property address + mailing (situs OK when assessor has no mail). */
-export function isLeadSaveable(lead: Lead): boolean {
-  const name = (lead.owner_name || "").trim();
-  if (name.length < 2) return false;
-  if (isPlaceholderOwner(name)) return false;
-  if (!isValidStreetAddress(lead.address)) return false;
-  if (!hasMailingAddress(lead)) return false;
-  return true;
+  return missingOwner || missingStreet || missingMailing;
 }
 
 function applyAssessorMatch(lead: Lead, match: AssessorProperty, state: string): Lead {
@@ -109,9 +179,7 @@ function applyAssessorMatch(lead: Lead, match: AssessorProperty, state: string):
     address: situsAddress,
     city: situsCity,
     zip: situsZip,
-    mailing_address: useAssessorMail
-      ? mailAddr
-      : lead.mailing_address || situsAddress || null,
+    mailing_address: useAssessorMail ? mailAddr : lead.mailing_address || null,
     mailing_city: useAssessorMail
       ? match.mailingCity || lead.mailing_city || situsCity
       : lead.mailing_city || situsCity,
@@ -124,17 +192,14 @@ function applyAssessorMatch(lead: Lead, match: AssessorProperty, state: string):
   };
 }
 
-/** When assessor returns situs only, copy to mailing so the lead is complete. */
-function ensureMailingFromSitus(lead: Lead, state: string): Lead {
-  if (hasMailingAddress(lead)) return lead;
-  if (!isValidStreetAddress(lead.address)) return lead;
-  return {
-    ...lead,
-    mailing_address: lead.address,
-    mailing_city: lead.mailing_city || lead.city,
-    mailing_state: lead.mailing_state || state,
-    mailing_zip: lead.mailing_zip || lead.zip || null,
-  };
+function resolveLookupAddress(lead: Lead): string | null {
+  for (const text of leadLocationCandidates(lead)) {
+    const extracted = extractAddressFromListing(text);
+    if (extracted) return extracted;
+    if (isValidStreetAddress(text)) return text;
+    if (isLegalOrPartialAddress(text) && /^\d+/.test(text)) return text;
+  }
+  return null;
 }
 
 async function lookupByAddressVariants(
@@ -146,32 +211,6 @@ async function lookupByAddressVariants(
     const match = await lookupByAddress(variant, county, state);
     if (match?.ownerName || match?.address) return match;
   }
-  return null;
-}
-
-function resolveLookupAddress(lead: Lead): string | null {
-  const candidates: string[] = [];
-
-  if (lead.address?.trim()) candidates.push(lead.address.trim());
-  if (lead.description?.trim()) candidates.push(lead.description.trim());
-
-  if (lead.raw_data) {
-    try {
-      const raw = JSON.parse(lead.raw_data) as Record<string, string>;
-      if (raw.detailAddress?.trim()) candidates.push(raw.detailAddress.trim());
-      if (raw.title?.trim()) candidates.push(raw.title.trim());
-      if (raw.location?.trim()) candidates.push(raw.location.trim());
-    } catch {
-      /* ignore */
-    }
-  }
-
-  for (const text of candidates) {
-    const extracted = extractAddressFromListing(text);
-    if (extracted) return extracted;
-    if (isValidStreetAddress(text)) return text;
-  }
-
   return null;
 }
 
@@ -193,22 +232,37 @@ async function enrichOne(lead: Lead): Promise<Lead> {
 
     const stillMissingOwner =
       !current.owner_name?.trim() || isPlaceholderOwner(current.owner_name);
-    const stillMissingAddress = !isValidStreetAddress(current.address);
-    const stillMissingMailing = !hasMailingAddress(current);
+    const stillMissingStreet = !isValidStreetAddress(current.address);
     const hasRealOwner =
       !!current.owner_name?.trim() && !isPlaceholderOwner(current.owner_name);
 
-    if (hasRealOwner && (stillMissingAddress || stillMissingMailing)) {
+    if (hasRealOwner && stillMissingStreet) {
       const properties = await lookupOwnerProperties(current.owner_name!, county, state);
       const first = properties[0];
       if (first) current = applyAssessorMatch(current, first, state);
-    } else if (stillMissingOwner || stillMissingAddress) {
-      const hint = current.description || current.case_number || "";
-      if (hint.length >= 3) {
+    } else if (stillMissingOwner || stillMissingStreet) {
+      const hints = [current.description, current.case_number, current.owner_name].filter(
+        (h): h is string => !!h && h.trim().length >= 3,
+      );
+      for (const hint of hints) {
         const properties = await lookupOwnerProperties(hint, county, state);
         const first = properties[0];
-        if (first) current = applyAssessorMatch(current, first, state);
+        if (first) {
+          current = applyAssessorMatch(current, first, state);
+          break;
+        }
       }
+    }
+
+    // Best-effort mailing only — never required for save
+    if (!hasMailingAddress(current) && isValidStreetAddress(current.address)) {
+      current = {
+        ...current,
+        mailing_address: current.mailing_address || current.address,
+        mailing_city: current.mailing_city || current.city,
+        mailing_state: current.mailing_state || state,
+        mailing_zip: current.mailing_zip || current.zip || null,
+      };
     }
   } catch (error) {
     logger.debug({ leadId: lead.id, err: error }, "Assessor enrichment failed");
@@ -218,17 +272,17 @@ async function enrichOne(lead: Lead): Promise<Lead> {
     current.owner_name = null;
   }
 
-  return ensureMailingFromSitus(current, state);
+  return current;
 }
 
-/** County assessor enrichment — runs on every lead in the batch (FSBO included). */
+/** Best-effort county assessor enrichment — never blocks saving. */
 export async function enrichLeads(
   leads: Lead[],
   onProgress?: (msg: string) => void,
 ): Promise<Lead[]> {
   if (!leads.length) return leads;
 
-  onProgress?.(`Enriching ${leads.length} leads via county assessor...`);
+  onProgress?.(`Enriching ${leads.length} leads via county assessor (best-effort)...`);
 
   const results: Lead[] = [];
   for (let i = 0; i < leads.length; i += CONCURRENCY) {
@@ -238,13 +292,10 @@ export async function enrichLeads(
   }
 
   const saveable = results.filter(isLeadSaveable).length;
-  const skipped = leads.length - saveable;
+  const complete = results.filter((l) => enrichmentStatus(l) === "complete").length;
   onProgress?.(
-    `✓ Assessor enriched ${leads.length} leads (${saveable} complete with owner+address+mailing)`,
+    `✓ Enriched ${leads.length} leads (${saveable} usable, ${complete} fully enriched)`,
   );
-  if (skipped > 0) {
-    onProgress?.(`⚠ ${skipped} leads incomplete after assessor enrichment`);
-  }
 
   return results;
 }
@@ -292,7 +343,7 @@ export async function enrichExistingLeads(opts: {
         updated++;
       }
 
-      if (!isLeadSaveable(after)) {
+      if (enrichmentStatus(after) === "partial") {
         stillIncomplete++;
         const name = (after.owner_name || "").trim();
         if (name.length < 2 || isPlaceholderOwner(name)) stillMissingOwner++;

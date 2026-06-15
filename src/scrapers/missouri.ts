@@ -30,6 +30,8 @@ import {
   fetchBlockedPage,
   CountyConfig,
   settleScraperResults,
+  courtCaseToLead,
+  validateHtmlResponse,
 } from "./base.js";
 import {
   collectCraigslistSearchItems,
@@ -409,14 +411,15 @@ async function scrapeJacksonProbate(fromDate: string, toDate: string): Promise<L
       submit: "Search",
     }).toString();
 
-    const res = await fetchWithRetry(url, {
+    const res = await fetchBlockedPage(url, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
     });
-    if (!res.ok) return leads;
+    const check = validateHtmlResponse(res, "Jackson MO Probate");
+    if (!check.ok) return leads;
 
-    const html = await res.text();
+    const html = res;
     const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
     const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
     const rows = html.match(rowRe) || [];
@@ -448,33 +451,35 @@ async function scrapeJacksonProbate(fromDate: string, toDate: string): Promise<L
       for (let j = 0; j < batch.length; j++) {
         const { caseNum, caseName, filedDate } = batch[j];
         const properties = results[j];
-        if (properties.length === 0) continue;
+        if (properties.length === 0) {
+          leads.push(
+            courtCaseToLead({
+              county: COUNTY,
+              state: STATE,
+              leadType: "Probate/Estate",
+              caseNum,
+              caseName,
+              filedDate,
+              sourceUrl: url,
+              city: "Kansas City",
+            }),
+          );
+          continue;
+        }
         for (const prop of properties) {
-          leads.push({
-            id: makeId(COUNTY, STATE, "Probate", `${caseNum}-${prop.address}`),
-            county: COUNTY,
-            state: STATE,
-            lead_type: "Probate/Estate",
-            owner_name: caseName || null,
-            address: prop.address,
-            city: prop.city || "Kansas City",
-            zip: prop.zip || null,
-            mailing_address: null,
-            mailing_city: null,
-            mailing_state: null,
-            mailing_zip: null,
-            case_number: caseNum,
-            filing_date: formatDate(filedDate),
-            assessed_value: null,
-            tax_year: null,
-            lender: null,
-            loan_amount: null,
-            sale_date: null,
-            sale_amount: null,
-            description: `Jackson County MO Probate — ${caseName || caseNum}`,
-            source_url: url,
-            raw_data: JSON.stringify({ caseNum, caseName, filedDate, parcelId: prop.parcelId }),
-          });
+          leads.push(
+            courtCaseToLead({
+              county: COUNTY,
+              state: STATE,
+              leadType: "Probate/Estate",
+              caseNum,
+              caseName,
+              filedDate,
+              sourceUrl: url,
+              city: prop.city || "Kansas City",
+              prop,
+            }),
+          );
         }
       }
     }
@@ -827,36 +832,53 @@ async function scrapeClayCounty(fromDate: string, toDate: string): Promise<Lead[
     if (taxRes.ok) {
       const taxHtml = await taxRes.text();
       const $ = cheerio.load(taxHtml);
-      $("a[href*='.pdf'], a[href*='sold'], a[href*='list']").each((_, el) => {
+      const pdfUrls: string[] = [];
+      $("a[href*='.pdf']").each((_, el) => {
         const href = $(el).attr("href");
         const text = $(el).text().trim();
-        if (!href || !/tax|sold|list|delinquent/i.test(text + href)) return;
-        leads.push({
-          id: makeId(COUNTY, STATE, "Tax Delinquent", href),
-          county: COUNTY,
-          state: STATE,
-          lead_type: "Tax Delinquent",
-          owner_name: null,
-          address: null,
-          city: "Liberty",
-          zip: null,
-          mailing_address: null,
-          mailing_city: null,
-          mailing_state: null,
-          mailing_zip: null,
-          case_number: null,
-          filing_date: formatDate(fromDate),
-          assessed_value: null,
-          tax_year: new Date().getFullYear().toString(),
-          lender: null,
-          loan_amount: null,
-          sale_date: null,
-          sale_amount: null,
-          description: `Clay County Tax Delinquent — ${text}`,
-          source_url: href.startsWith("http") ? href : `https://claycountymo.tax${href}`,
-          raw_data: JSON.stringify({ text, href }),
-        });
+        if (!href || /guideline|affidavit|bid form|bidder|view post|instructions|faq/i.test(text))
+          return;
+        if (!/list|sold|delinquent|properties|parcel|tax/i.test(text + href)) return;
+        pdfUrls.push(
+          href.startsWith("http")
+            ? href
+            : `https://claycountymo.tax${href.startsWith("/") ? "" : "/"}${href}`,
+        );
       });
+      for (const pdfUrl of pdfUrls) {
+        try {
+          const rows = await fetchTaxSalePdfRows(pdfUrl);
+          for (const row of rows) {
+            leads.push({
+              id: makeId(COUNTY, STATE, "Tax Delinquent", `${row.acct}-${row.owner}`),
+              county: COUNTY,
+              state: STATE,
+              lead_type: "Tax Delinquent",
+              owner_name: row.owner,
+              address: row.address || null,
+              city: row.city || "Liberty",
+              zip: row.zip,
+              mailing_address: null,
+              mailing_city: null,
+              mailing_state: null,
+              mailing_zip: null,
+              case_number: row.acct || null,
+              filing_date: formatDate(fromDate),
+              assessed_value: null,
+              tax_year: new Date().getFullYear().toString(),
+              lender: null,
+              loan_amount: null,
+              sale_date: null,
+              sale_amount: row.amount,
+              description: `Clay County Tax Delinquent — ${row.owner}`,
+              source_url: pdfUrl,
+              raw_data: JSON.stringify(row),
+            });
+          }
+        } catch (e) {
+          console.warn(`[Clay MO] tax PDF parse failed: ${pdfUrl}`, e);
+        }
+      }
     }
   } catch (e) {
     console.error(`[Clay MO] error:`, e);
@@ -986,10 +1008,33 @@ async function scrapePlatteCounty(fromDate: string, toDate: string): Promise<Lea
 }
 
 // ─── CASS COUNTY ─────────────────────────────────────────────────────────────
+async function discoverCassTaxPdfUrl(): Promise<string> {
+  const fallback = "https://www.casscounty.com/DocumentCenter/View/3889/2024-TAX-SALE-LIST";
+  try {
+    const res = await fetchWithRetry("https://www.casscounty.com/164/Tax-Sale");
+    if (!res.ok) return fallback;
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    let best: string | null = null;
+    $("a[href]").each((_, el) => {
+      const href = $(el).attr("href") || "";
+      const text = $(el).text();
+      if (/tax.?sale|delinquent|tax sale list/i.test(text + href)) {
+        best = href.startsWith("http")
+          ? href
+          : `https://www.casscounty.com${href.startsWith("/") ? "" : "/"}${href}`;
+      }
+    });
+    return best || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 async function scrapeCassCounty(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
   const COUNTY = "Cass";
-  const taxPdfUrl = "https://www.casscounty.com/DocumentCenter/View/3889/2024-TAX-SALE-LIST";
+  const taxPdfUrl = await discoverCassTaxPdfUrl();
   try {
     const rows = await fetchTaxSalePdfRows(taxPdfUrl);
     for (const row of rows) {
@@ -1209,7 +1254,8 @@ async function scrapeLisPendens(fromDate: string, toDate: string): Promise<Lead[
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body,
       });
-      if (!html) continue;
+      const lisCheck = validateHtmlResponse(html, `${name} MO Lis Pendens`);
+      if (!lisCheck.ok) continue;
       const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
       const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
       const rows = html.match(rowRe) || [];
@@ -1235,33 +1281,35 @@ async function scrapeLisPendens(fromDate: string, toDate: string): Promise<Lead[
         for (let j = 0; j < batch.length; j++) {
           const { caseNum, caseName, filedDate } = batch[j];
           const properties = results[j];
-          if (properties.length === 0) continue; // skip if no property found
+          if (properties.length === 0) {
+            leads.push(
+              courtCaseToLead({
+                county: name,
+                state: STATE,
+                leadType: "Lis Pendens",
+                caseNum,
+                caseName,
+                filedDate,
+                sourceUrl: url,
+                city: "Kansas City",
+              }),
+            );
+            continue;
+          }
           for (const prop of properties) {
-            leads.push({
-              id: makeId(name, STATE, "Lis Pendens", `${caseNum}-${prop.address}`),
-              county: name,
-              state: STATE,
-              lead_type: "Lis Pendens",
-              owner_name: prop.ownerName || caseName || null,
-              address: prop.address,
-              city: prop.city || "Kansas City",
-              zip: prop.zip || null,
-              mailing_address: null,
-              mailing_city: null,
-              mailing_state: null,
-              mailing_zip: null,
-              case_number: caseNum,
-              filing_date: formatDate(filedDate),
-              assessed_value: null,
-              tax_year: null,
-              lender: null,
-              loan_amount: null,
-              sale_date: null,
-              sale_amount: null,
-              description: `${name} County MO Lis Pendens — ${caseName}`,
-              source_url: url,
-              raw_data: JSON.stringify({ caseNum, caseName, filedDate, parcelId: prop.parcelId }),
-            });
+            leads.push(
+              courtCaseToLead({
+                county: name,
+                state: STATE,
+                leadType: "Lis Pendens",
+                caseNum,
+                caseName,
+                filedDate,
+                sourceUrl: url,
+                city: prop.city || "Kansas City",
+                prop,
+              }),
+            );
           }
         }
       }
@@ -1298,7 +1346,8 @@ async function scrapeMOProbate(fromDate: string, toDate: string): Promise<Lead[]
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body,
       });
-      if (!html) continue;
+      const probateCheck = validateHtmlResponse(html, `${name} MO Probate`);
+      if (!probateCheck.ok) continue;
       const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
       const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
       const rows = html.match(rowRe) || [];
@@ -1324,33 +1373,35 @@ async function scrapeMOProbate(fromDate: string, toDate: string): Promise<Lead[]
         for (let j = 0; j < batch.length; j++) {
           const { caseNum, caseName, filedDate } = batch[j];
           const properties = results[j];
-          if (properties.length === 0) continue;
+          if (properties.length === 0) {
+            leads.push(
+              courtCaseToLead({
+                county: name,
+                state: STATE,
+                leadType: "Probate/Estate",
+                caseNum,
+                caseName,
+                filedDate,
+                sourceUrl: url,
+                city,
+              }),
+            );
+            continue;
+          }
           for (const prop of properties) {
-            leads.push({
-              id: makeId(name, STATE, "Probate", `${caseNum}-${prop.address}`),
-              county: name,
-              state: STATE,
-              lead_type: "Probate/Estate",
-              owner_name: prop.ownerName || caseName || null,
-              address: prop.address,
-              city: prop.city || city,
-              zip: prop.zip || null,
-              mailing_address: null,
-              mailing_city: null,
-              mailing_state: null,
-              mailing_zip: null,
-              case_number: caseNum,
-              filing_date: formatDate(filedDate),
-              assessed_value: null,
-              tax_year: null,
-              lender: null,
-              loan_amount: null,
-              sale_date: null,
-              sale_amount: null,
-              description: `${name} County MO Probate — ${caseName}`,
-              source_url: url,
-              raw_data: JSON.stringify({ caseNum, caseName, filedDate, parcelId: prop.parcelId }),
-            });
+            leads.push(
+              courtCaseToLead({
+                county: name,
+                state: STATE,
+                leadType: "Probate/Estate",
+                caseNum,
+                caseName,
+                filedDate,
+                sourceUrl: url,
+                city: prop.city || city,
+                prop,
+              }),
+            );
           }
         }
       }
@@ -1380,13 +1431,13 @@ async function scrapeMODivorce(fromDate: string, toDate: string): Promise<Lead[]
         toDate,
         submit: "Search",
       }).toString();
-      const res = await fetchWithRetry(url, {
+      const html = await fetchBlockedPage(url, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body,
       });
-      if (!res.ok) continue;
-      const html = await res.text();
+      const divCheck = validateHtmlResponse(html, `${name} MO Divorce`);
+      if (!divCheck.ok) continue;
       const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
       const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
       const rows = html.match(rowRe) || [];
@@ -1412,33 +1463,35 @@ async function scrapeMODivorce(fromDate: string, toDate: string): Promise<Lead[]
         for (let j = 0; j < batch.length; j++) {
           const { caseNum, caseName, filedDate } = batch[j];
           const properties = results[j];
-          if (properties.length === 0) continue;
+          if (properties.length === 0) {
+            leads.push(
+              courtCaseToLead({
+                county: name,
+                state: STATE,
+                leadType: "Divorce",
+                caseNum,
+                caseName,
+                filedDate,
+                sourceUrl: url,
+                city,
+              }),
+            );
+            continue;
+          }
           for (const prop of properties) {
-            leads.push({
-              id: makeId(name, STATE, "Divorce", `${caseNum}-${prop.address}`),
-              county: name,
-              state: STATE,
-              lead_type: "Divorce",
-              owner_name: prop.ownerName || caseName || null,
-              address: prop.address,
-              city: prop.city || city,
-              zip: prop.zip || null,
-              mailing_address: null,
-              mailing_city: null,
-              mailing_state: null,
-              mailing_zip: null,
-              case_number: caseNum,
-              filing_date: formatDate(filedDate),
-              assessed_value: null,
-              tax_year: null,
-              lender: null,
-              loan_amount: null,
-              sale_date: null,
-              sale_amount: null,
-              description: `${name} County MO Divorce — ${caseName}`,
-              source_url: url,
-              raw_data: JSON.stringify({ caseNum, caseName, filedDate, parcelId: prop.parcelId }),
-            });
+            leads.push(
+              courtCaseToLead({
+                county: name,
+                state: STATE,
+                leadType: "Divorce",
+                caseNum,
+                caseName,
+                filedDate,
+                sourceUrl: url,
+                city: prop.city || city,
+                prop,
+              }),
+            );
           }
         }
       }

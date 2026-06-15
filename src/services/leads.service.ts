@@ -17,10 +17,15 @@ import type { RawLead } from "../types/raw-lead.js";
 import { leadsToCsv } from "./csv.service.js";
 import { getRawSettings } from "./settings.service.js";
 import { runSkipTrace } from "./skip-trace.service.js";
+import { enrichmentStatus } from "./enrichment.service.js";
 import { ApiError } from "../utils/api-error.js";
 
+function withEnrichmentStatus(lead: Lead): Lead {
+  return { ...lead, enrichment_status: enrichmentStatus(lead) };
+}
+
 function rawLeadToPendingLead(row: RawLead): Lead {
-  return {
+  const lead: Lead = {
     id: row.id,
     county: row.county,
     state: row.state,
@@ -29,18 +34,18 @@ function rawLeadToPendingLead(row: RawLead): Lead {
     address: row.address,
     city: row.city,
     zip: row.zip,
-    mailing_address: null,
-    mailing_city: null,
-    mailing_state: null,
-    mailing_zip: null,
-    case_number: null,
-    filing_date: null,
-    assessed_value: null,
-    tax_year: null,
-    lender: null,
-    loan_amount: null,
-    sale_date: null,
-    sale_amount: null,
+    mailing_address: row.mailing_address,
+    mailing_city: row.mailing_city,
+    mailing_state: row.mailing_state,
+    mailing_zip: row.mailing_zip,
+    case_number: row.case_number,
+    filing_date: row.filing_date,
+    assessed_value: row.assessed_value,
+    tax_year: row.tax_year,
+    lender: row.lender,
+    loan_amount: row.loan_amount,
+    sale_date: row.sale_date,
+    sale_amount: row.sale_amount,
     description: row.description,
     source_url: row.source_url,
     raw_data: row.raw_data,
@@ -49,6 +54,7 @@ function rawLeadToPendingLead(row: RawLead): Lead {
     pipeline_status: "pending",
     reject_reason: row.reject_reason,
   };
+  return withEnrichmentStatus(lead);
 }
 
 export async function listLeads(
@@ -62,7 +68,7 @@ export async function listLeads(
     const total = await countLeads(rest);
     const leads = await findLeads({ ...rest, limit, offset });
     return {
-      leads: leads.map((l) => ({ ...l, pipeline_status: "complete" as const })),
+      leads: leads.map((l) => withEnrichmentStatus({ ...l, pipeline_status: "complete" as const })),
       total,
     };
   }
@@ -88,7 +94,9 @@ export async function listLeads(
     .map(rawLeadToPendingLead);
 
   const merged = [
-    ...completeLeads.map((l) => ({ ...l, pipeline_status: "complete" as const })),
+    ...completeLeads.map((l) =>
+      withEnrichmentStatus({ ...l, pipeline_status: "complete" as const }),
+    ),
     ...pendingLeads,
   ];
 

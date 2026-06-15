@@ -39,6 +39,7 @@ const LEAD_TYPE_ALIASES: Record<string, string> = {
 /** Lead types emitted by scrapers that satisfy a requested canonical type. */
 const LEAD_TYPE_MATCHES: Record<string, string[]> = {
   Probate: ["Probate", "Probate/Estate"],
+  "Pre-Foreclosure": ["Pre-Foreclosure", "Lis Pendens"],
 };
 
 export function normalizeLeadType(type: string): string {

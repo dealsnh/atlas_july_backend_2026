@@ -8,7 +8,7 @@ describe("resolveRejectReason", () => {
     );
   });
 
-  it("detects missing owner after enrichment", () => {
+  it("detects missing identity", () => {
     expect(
       resolveRejectReason({
         owner_name: null,
@@ -22,5 +22,15 @@ describe("resolveRejectReason", () => {
     expect(resolveRejectReason({ owner_name: null, address: null } as never)).toBe(
       RAW_REJECT_REASON.MISSING_ADDRESS_AND_OWNER,
     );
+  });
+
+  it("detects missing property location when identity exists", () => {
+    expect(
+      resolveRejectReason({
+        owner_name: "SMITH JOHN",
+        address: null,
+        description: "x",
+      } as never),
+    ).toBe(RAW_REJECT_REASON.MISSING_PROPERTY_LOCATION);
   });
 });

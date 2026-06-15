@@ -1,5 +1,6 @@
 import { normalizeCounty, normalizeLeadType } from "../db/schema.js";
 import { execute, query, queryOne } from "../db/query.js";
+import { isLeadSaveable } from "../services/enrichment.service.js";
 import type { Lead, LeadFilters, LeadStats } from "../types/lead.js";
 
 const LEAD_FIELDS = [
@@ -29,9 +30,7 @@ const LEAD_FIELDS = [
 ] as const;
 
 export async function insertLeadIfNotExists(lead: Record<string, string | null>): Promise<boolean> {
-  const addr = (lead.address || "").trim();
-  const name = (lead.owner_name || "").trim();
-  if ((!addr || addr.length < 5) && (!name || name.length < 2)) return false;
+  if (!isLeadSaveable(lead as never)) return false;
 
   const existing = await queryOne<{ id: string }>("SELECT id FROM leads WHERE id = $1", [lead.id]);
   if (existing) return false;

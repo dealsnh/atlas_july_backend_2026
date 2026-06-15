@@ -34,6 +34,8 @@ export interface Lead {
   /** Present when merged from raw_leads via include_pending */
   pipeline_status?: "complete" | "pending";
   reject_reason?: string | null;
+  /** complete = street + owner enriched; partial = saved with gaps */
+  enrichment_status?: "complete" | "partial";
 }
 
 export interface LeadFilters {

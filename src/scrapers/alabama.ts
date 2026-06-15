@@ -14,6 +14,8 @@ import {
   fetchRendered,
   fetchBlockedPage,
   settleScraperResults,
+  courtCaseToLead,
+  validateHtmlResponse,
 } from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
 import {
@@ -262,7 +264,6 @@ async function scrapeMadisonTaxDelinquent(fromDate: string, toDate: string): Pro
       source_url: MADISON_CERT_XLSX,
       raw_data: JSON.stringify({ parcel, owner, amount, taxYear }),
     });
-    if (leads.length >= 100) break;
   }
   return leads;
 }
@@ -303,7 +304,6 @@ async function scrapeMadisonSheriffSales(fromDate: string, toDate: string): Prom
       source_url: MADISON_CERT_XLSX,
       raw_data: JSON.stringify({ parcel, owner, saleDate, amount }),
     });
-    if (leads.length >= 100) break;
   }
   return leads;
 }
@@ -725,33 +725,35 @@ export async function scrapeProbate(
       for (let j = 0; j < batch.length; j++) {
         const { caseNum, name, filed } = batch[j];
         const properties = results[j];
-        if (properties.length === 0) continue;
+        if (properties.length === 0) {
+          leads.push(
+            courtCaseToLead({
+              county,
+              state: "AL",
+              leadType: "Probate",
+              caseNum,
+              caseName: name,
+              filedDate: filed,
+              sourceUrl: url,
+              city: county,
+            }),
+          );
+          continue;
+        }
         for (const prop of properties) {
-          leads.push({
-            id: makeId("PROB", `${caseNum || name}-${prop.address}`, county, "AL"),
-            county,
-            state: "AL",
-            lead_type: "Probate",
-            owner_name: name || null,
-            address: prop.address,
-            city: prop.city || county,
-            zip: prop.zip || null,
-            mailing_address: null,
-            mailing_city: null,
-            mailing_state: null,
-            mailing_zip: null,
-            case_number: caseNum || null,
-            filing_date: formatDate(filed),
-            assessed_value: null,
-            tax_year: null,
-            lender: null,
-            loan_amount: null,
-            sale_date: null,
-            sale_amount: null,
-            description: `${county} County AL Probate — ${name || caseNum}`,
-            source_url: url,
-            raw_data: JSON.stringify({ caseNum, name, filed, parcelId: prop.parcelId }),
-          });
+          leads.push(
+            courtCaseToLead({
+              county,
+              state: "AL",
+              leadType: "Probate",
+              caseNum,
+              caseName: name,
+              filedDate: filed,
+              sourceUrl: url,
+              city: prop.city || county,
+              prop,
+            }),
+          );
         }
       }
     }

@@ -99,20 +99,53 @@ async function runConfiguredStateWideScrapers(
   toDate: string,
   onProgress: ((msg: string) => void) | undefined,
   errors: string[],
-  stateLeads: Lead[],
-): Promise<void> {
+): Promise<Lead[]> {
   const requested = new Set(unionLeadTypes(stateCounties));
   const scrapers = stateWideScrapers(state, fromDate, toDate).filter(([, leadType]) =>
     requested.has(leadType),
   );
-  if (!scrapers.length) return;
+  if (!scrapers.length) return [];
 
+  const wideLeads: Lead[] = [];
   await runStateWideScrapers(
     scrapers.map(([label, , fn]) => [label, fn]),
     onProgress,
     errors,
-    stateLeads,
+    wideLeads,
   );
+  return wideLeads;
+}
+
+async function scrapePublicSearchForCounty(
+  county: CountyConfig,
+  fromDate: string,
+  toDate: string,
+  onProgress: ((msg: string) => void) | undefined,
+  errors: string[],
+): Promise<Lead[]> {
+  const name = countyName(county);
+  const types = county.leadTypes ?? [];
+  if (!county.publicsearch_slug || !county.publicsearch_state) return [];
+
+  try {
+    onProgress?.(`Scraping ${name} via publicsearch.us (${types.join(", ")})...`);
+    const psLeads = await scrapePublicSearchLeads(
+      name,
+      county.state,
+      county.publicsearch_slug,
+      county.publicsearch_state,
+      fromDate,
+      toDate,
+      types,
+    );
+    onProgress?.(`✓ publicsearch ${name}: ${psLeads.length} leads`);
+    return psLeads;
+  } catch (e) {
+    const msg = `Error scraping publicsearch ${name}: ${(e as Error).message}`;
+    errors.push(msg);
+    onProgress?.(`✗ ${msg}`);
+    return [];
+  }
 }
 
 // Run all scrapers for the configured counties
@@ -134,8 +167,6 @@ export async function runAllScrapers(
   }
 
   for (const [state, stateCounties] of Array.from(stateGroups)) {
-    const stateLeads: Lead[] = [];
-
     if (state === "MO") {
       for (const county of stateCounties) {
         const name = countyName(county);
@@ -144,9 +175,20 @@ export async function runAllScrapers(
           onProgress?.(`Scraping ${name}, MO (${types.join(", ")})...`);
           const leads = await missouri.scrapeCounty(name, fromDate, toDate, types, errors);
           allLeads.push(...leads);
-          stateLeads.push(...leads);
           onProgress?.(`✓ ${name} MO: ${leads.length} leads`);
           if (leads.length) await onLeadsBatch?.(leads);
+
+          const psLeads = await scrapePublicSearchForCounty(
+            county,
+            fromDate,
+            toDate,
+            onProgress,
+            errors,
+          );
+          if (psLeads.length) {
+            allLeads.push(...psLeads);
+            await onLeadsBatch?.(psLeads);
+          }
         } catch (e) {
           const msg = `Error scraping ${name} MO: ${(e as Error).message}`;
           errors.push(msg);
@@ -159,6 +201,7 @@ export async function runAllScrapers(
     for (const county of stateCounties) {
       const name = countyName(county);
       const types = county.leadTypes ?? [];
+      const countyLeads: Lead[] = [];
       try {
         onProgress?.(`Scraping ${name}, ${county.state} (${types.join(", ")})...`);
         let leads: Lead[] = [];
@@ -174,31 +217,21 @@ export async function runAllScrapers(
           continue;
         }
 
+        countyLeads.push(...leads);
         allLeads.push(...leads);
-        stateLeads.push(...leads);
         onProgress?.(`✓ ${name} ${county.state}: ${leads.length} leads`);
 
-        if (county.publicsearch_slug && county.publicsearch_state) {
-          try {
-            onProgress?.(`Scraping ${name} via publicsearch.us (${types.join(", ")})...`);
-            const psLeads = await scrapePublicSearchLeads(
-              name,
-              county.state,
-              county.publicsearch_slug,
-              county.publicsearch_state,
-              fromDate,
-              toDate,
-              types,
-            );
-            allLeads.push(...psLeads);
-            stateLeads.push(...psLeads);
-            onProgress?.(`✓ publicsearch ${name}: ${psLeads.length} leads`);
-          } catch (e) {
-            const msg = `Error scraping publicsearch ${name}: ${(e as Error).message}`;
-            errors.push(msg);
-            onProgress?.(`✗ ${msg}`);
-          }
-        }
+        const psLeads = await scrapePublicSearchForCounty(
+          county,
+          fromDate,
+          toDate,
+          onProgress,
+          errors,
+        );
+        countyLeads.push(...psLeads);
+        allLeads.push(...psLeads);
+
+        if (countyLeads.length) await onLeadsBatch?.(countyLeads);
       } catch (e) {
         const msg = `Error scraping ${name} ${county.state}: ${(e as Error).message}`;
         errors.push(msg);
@@ -206,19 +239,16 @@ export async function runAllScrapers(
       }
     }
 
-    const beforeWide = stateLeads.length;
-    await runConfiguredStateWideScrapers(
+    const wideLeads = await runConfiguredStateWideScrapers(
       state,
       stateCounties,
       fromDate,
       toDate,
       onProgress,
       errors,
-      stateLeads,
     );
-    allLeads.push(...stateLeads.slice(beforeWide));
-
-    if (stateLeads.length) await onLeadsBatch?.(stateLeads);
+    allLeads.push(...wideLeads);
+    if (wideLeads.length) await onLeadsBatch?.(wideLeads);
   }
 
   return { leads: allLeads, errors };

@@ -157,7 +157,86 @@ export async function fetchRendered(url: string, retries = 2): Promise<Response>
 
 function looksBlocked(html: string): boolean {
   if (!html || html.length < 150) return true;
-  return /403 Forbidden|Access Denied|cf-browser-verification|Just a moment/i.test(html);
+  return /403 Forbidden|Access Denied|cf-browser-verification|Just a moment|captcha|g-recaptcha|login required|please sign in|session expired|enable javascript/i.test(
+    html,
+  );
+}
+
+/** Detect empty, blocked, or login-wall HTML; log and return reason when invalid. */
+export function validateHtmlResponse(
+  html: string,
+  label: string,
+  minLength = 200,
+): { ok: boolean; reason?: string } {
+  if (!html || html.trim().length < minLength) {
+    const reason = `${label}: empty or too-short response (${html?.length ?? 0} bytes)`;
+    console.warn(`[validateHtml] ${reason}`);
+    return { ok: false, reason };
+  }
+  if (looksBlocked(html)) {
+    const reason = `${label}: blocked, CAPTCHA, or login page detected`;
+    console.warn(`[validateHtml] ${reason}`);
+    return { ok: false, reason };
+  }
+  return { ok: true };
+}
+
+export interface CourtCaseLeadOpts {
+  county: string;
+  state: string;
+  leadType: string;
+  caseNum: string;
+  caseName: string;
+  filedDate: string;
+  sourceUrl: string;
+  city?: string | null;
+  prop?: {
+    address?: string;
+    city?: string;
+    zip?: string;
+    parcelId?: string;
+    ownerName?: string;
+    mailingAddress?: string;
+    mailingCity?: string;
+    mailingState?: string;
+    mailingZip?: string;
+  } | null;
+}
+
+/** Court case lead — always emitted; assessor match enriches when available. */
+export function courtCaseToLead(opts: CourtCaseLeadOpts): Lead {
+  const { county, state, leadType, caseNum, caseName, filedDate, sourceUrl, city, prop } = opts;
+  const addr = prop?.address || null;
+  return {
+    id: makeId(county, state, leadType, `${caseNum}-${addr || caseName}`),
+    county,
+    state,
+    lead_type: leadType,
+    owner_name: prop?.ownerName || caseName || null,
+    address: addr,
+    city: prop?.city || city || null,
+    zip: prop?.zip || null,
+    mailing_address: prop?.mailingAddress || null,
+    mailing_city: prop?.mailingCity || null,
+    mailing_state: prop?.mailingState || null,
+    mailing_zip: prop?.mailingZip || null,
+    case_number: caseNum || null,
+    filing_date: formatDate(filedDate),
+    assessed_value: null,
+    tax_year: null,
+    lender: null,
+    loan_amount: null,
+    sale_date: null,
+    sale_amount: null,
+    description: `${county} County ${state} ${leadType} — ${caseName || caseNum}`,
+    source_url: sourceUrl,
+    raw_data: JSON.stringify({
+      caseNum,
+      caseName,
+      filedDate,
+      parcelId: prop?.parcelId,
+    }),
+  };
 }
 
 function fetchViaBrightDataCurl(url: string, options: RequestInit = {}): string {
@@ -197,7 +276,9 @@ function needsResidentialProxy(url: string): boolean {
     url.includes("craigslist.org") ||
     url.includes("plattesheriff.org") ||
     url.includes("plattecountycollector.com") ||
-    url.includes("courts.mo.gov/casenet")
+    url.includes("courts.mo.gov/casenet") ||
+    url.includes("v2.alacourt.com") ||
+    url.includes("probatect.org")
   );
 }
 

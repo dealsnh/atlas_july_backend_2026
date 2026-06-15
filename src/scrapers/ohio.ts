@@ -22,7 +22,7 @@
  */
 
 import * as XLSX from "xlsx";
-import { Lead, makeId, formatDate, fetchWithRetry, fetchRendered, settleScraperResults } from "./base.js";
+import { Lead, makeId, formatDate, fetchWithRetry, fetchRendered, fetchBlockedPage, settleScraperResults, courtCaseToLead, validateHtmlResponse } from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
 
 // ─── Pre-Foreclosure via Hamilton County Clerk of Courts ──────────────────────
@@ -170,7 +170,7 @@ async function scrapeTaxDelinquent(fromDate: string, toDate: string): Promise<Le
     const wb = XLSX.read(buf, { type: "buffer" });
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json<Record<string, string | number>>(sheet);
-    for (const row of rows.slice(0, 100)) {
+    for (const row of rows) {
       const parcel = String(row.parcel_number || "").trim();
       const owner1 = String(row.owner_name_1 || "").trim();
       const owner2 = String(row.owner_name_2 || "").trim();
@@ -239,9 +239,9 @@ async function scrapeProbate(fromDate: string, toDate: string): Promise<Lead[]> 
     // Hamilton County Probate Court — probatect.org
     // Try the case search with estate type
     const url = `https://www.probatect.org/case-search?fromDate=${fromDate}&caseType=estate`;
-    const res = await fetchWithRetry(url);
-    if (!res.ok) return leads;
-    const html = await res.text();
+    const html = await fetchBlockedPage(url);
+    const check = validateHtmlResponse(html, "Hamilton OH Probate");
+    if (!check.ok) return leads;
 
     const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
     const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
@@ -270,33 +270,35 @@ async function scrapeProbate(fromDate: string, toDate: string): Promise<Lead[]> 
       for (let j = 0; j < batch.length; j++) {
         const { ownerName, caseNum, cells } = batch[j];
         const properties = results[j];
-        if (properties.length === 0) continue;
+        if (properties.length === 0) {
+          leads.push(
+            courtCaseToLead({
+              county: "Hamilton",
+              state: "OH",
+              leadType: "Probate/Estate",
+              caseNum,
+              caseName: ownerName,
+              filedDate: cells[2] || fromDate,
+              sourceUrl: url,
+              city: "Cincinnati",
+            }),
+          );
+          continue;
+        }
         for (const prop of properties) {
-          leads.push({
-            id: makeId(`${caseNum}-${prop.address}`, "Hamilton", "OH", "probate"),
-            county: "Hamilton",
-            state: "OH",
-            lead_type: "Probate/Estate",
-            owner_name: ownerName,
-            address: prop.address,
-            city: prop.city || "Cincinnati",
-            zip: prop.zip || null,
-            mailing_address: null,
-            mailing_city: null,
-            mailing_state: null,
-            mailing_zip: null,
-            case_number: caseNum || null,
-            filing_date: formatDate(cells[2]),
-            assessed_value: null,
-            tax_year: null,
-            lender: null,
-            loan_amount: null,
-            sale_date: null,
-            sale_amount: null,
-            description: "Probate estate filing — potential property sale",
-            source_url: url,
-            raw_data: JSON.stringify({ cells, parcelId: prop.parcelId }),
-          });
+          leads.push(
+            courtCaseToLead({
+              county: "Hamilton",
+              state: "OH",
+              leadType: "Probate/Estate",
+              caseNum,
+              caseName: ownerName,
+              filedDate: cells[2] || fromDate,
+              sourceUrl: url,
+              city: prop.city || "Cincinnati",
+              prop,
+            }),
+          );
         }
       }
     }
