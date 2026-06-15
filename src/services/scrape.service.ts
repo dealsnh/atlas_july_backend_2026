@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import { resolveCountyLeadTypes } from "../config/county-lead-types.js";
 import { clientConfig } from "../config/constants.js";
+import { env } from "../config/env.js";
 import {
   findLeads,
   insertLeadIfNotExists,
@@ -172,25 +173,30 @@ export function startDailyCron(): void {
     "0 9 * * *",
     async () => {
       logger.info("Running daily scrape at 9:00 AM PT");
-      const { fromDate, toDate } = getDateRange(1);
+      const { fromDate, toDate } = getDateRange(env.SCRAPE_LOOKBACK_DAYS);
 
       try {
         const newLeads = await runScrapeJob(fromDate, toDate);
-        const settings = await getRawSettings();
-        const recipients = await getEmailRecipients();
 
-        if (recipients.length > 0 && newLeads > 0 && isSmtpReady(settings)) {
-          const allLeads = await findLeads({ from_date: toDate, to_date: toDate });
-          for (const recipient of recipients) {
-            await sendDailyReport(recipient, clientConfig.name, allLeads, toDate, settings).catch(
-              (error) => {
-                logger.error({ err: error, recipient }, "Daily email failed");
-              },
-            );
+        if (env.DISABLE_DAILY_EMAIL) {
+          logger.info("Daily email disabled (DISABLE_DAILY_EMAIL)");
+        } else {
+          const settings = await getRawSettings();
+          const recipients = await getEmailRecipients();
+
+          if (recipients.length > 0 && newLeads > 0 && isSmtpReady(settings)) {
+            const allLeads = await findLeads({ from_date: toDate, to_date: toDate });
+            for (const recipient of recipients) {
+              await sendDailyReport(recipient, clientConfig.name, allLeads, toDate, settings).catch(
+                (error) => {
+                  logger.error({ err: error, recipient }, "Daily email failed");
+                },
+              );
+            }
+            logger.info({ count: recipients.length }, "Daily report sent");
+          } else if (!isSmtpReady(settings)) {
+            logger.info("Email skipped — SMTP not configured");
           }
-          logger.info({ count: recipients.length }, "Daily report sent");
-        } else if (!isSmtpReady(settings)) {
-          logger.info("Email skipped — SMTP not configured");
         }
       } catch (error) {
         logger.error({ err: error }, "Daily scrape failed");
@@ -199,7 +205,10 @@ export function startDailyCron(): void {
     { timezone: "America/Los_Angeles" },
   );
 
-  logger.info("Daily scrape scheduled for 9:00 AM PT");
+  logger.info(
+    { lookbackDays: env.SCRAPE_LOOKBACK_DAYS, emailDisabled: env.DISABLE_DAILY_EMAIL },
+    "Daily scrape scheduled for 9:00 AM PT",
+  );
 }
 
 export { getDateRange };

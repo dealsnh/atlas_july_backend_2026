@@ -21,7 +21,7 @@
 
 import * as cheerio from "cheerio";
 import { normalizeLeadTypes } from "../config/county-lead-types.js";
-import { Lead, makeId, formatDate, fetchWithRetry } from "./base.js";
+import { Lead, makeId, formatDate, fetchWithRetry, settleScraperResults } from "./base.js";
 
 const STATE = "WI";
 
@@ -353,7 +353,7 @@ async function scrapeProbate(county: string, fromDate: string, toDate: string): 
 }
 
 // ─── OBITUARIES (legacy.com) ─────────────────────────────────────────────────
-async function scrapeObituaries(fromDate: string, toDate: string): Promise<Lead[]> {
+export async function scrapeObituaries(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
   try {
     // legacy.com Wisconsin obituaries
@@ -416,7 +416,7 @@ async function scrapeObituaries(fromDate: string, toDate: string): Promise<Lead[
 }
 
 // ─── FSBO (Craigslist Madison) ────────────────────────────────────────────────
-async function scrapeFSBO(fromDate: string, toDate: string): Promise<Lead[]> {
+export async function scrapeFSBO(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
   try {
     const url = "https://madison.craigslist.org/search/rea?query=for+sale+by+owner&srchType=A";
@@ -493,9 +493,12 @@ export async function scrapePreForeclosure(
   toDate: string,
 ): Promise<Lead[]> {
   const leads: Lead[] = [];
+  const countyCode = COUNTY_CODES[county];
+  if (!countyCode) return leads;
+
   try {
     // WCCA public records - foreclosure filings (case type FC)
-    const url = `https://wcca.wicourts.gov/jsonPost/searchCases?countyNo=${encodeURIComponent(county)}&caseType=FC&dateOfFilingStart=${fromDate}&dateOfFilingEnd=${toDate}&recordsPerPage=25`;
+    const url = `https://wcca.wicourts.gov/jsonPost/searchCases?countyNo=${encodeURIComponent(countyCode)}&caseType=FC&dateOfFilingStart=${fromDate}&dateOfFilingEnd=${toDate}&recordsPerPage=25`;
     const res = await fetchWithRetry(url, {
       headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" },
     });
@@ -825,21 +828,30 @@ export async function scrapeCounty(
   fromDate: string,
   toDate: string,
   leadTypes?: string[],
+  scraperErrors?: string[],
 ): Promise<Lead[]> {
   const runners: Record<string, () => Promise<Lead[]>> = {
     "Pre-Foreclosure": () => scrapePreForeclosure(county, fromDate, toDate),
     "Sheriff Sale": () => scrapeSheriffSales(county, fromDate, toDate),
     "Tax Delinquent": () => scrapeTaxDelinquent(county, fromDate, toDate),
     Probate: () => scrapeProbate(county, fromDate, toDate),
+    FSBO: async () => {
+      const all = await scrapeFSBO(fromDate, toDate);
+      return all.filter((l) => l.county.toLowerCase() === county.toLowerCase());
+    },
   };
 
   const types = leadTypes?.length ? normalizeLeadTypes(leadTypes) : Object.keys(runners);
-  const fns = types.map((t) => runners[t]).filter(Boolean) as Array<() => Promise<Lead[]>>;
-  const results = await Promise.allSettled(fns.map((fn) => fn()));
+  const entries = types
+    .map((t) => [t, runners[t]] as const)
+    .filter(([, fn]) => Boolean(fn));
+  const results = await Promise.allSettled(entries.map(([, fn]) => fn!()));
 
-  return results
-    .filter((r) => r.status === "fulfilled")
-    .flatMap((r) => (r as PromiseFulfilledResult<Lead[]>).value);
+  return settleScraperResults(
+    results,
+    entries.map(([t]) => `${county} WI ${t}`),
+    scraperErrors,
+  );
 }
 
 export async function scrapeAll(fromDate: string, toDate: string): Promise<Lead[]> {

@@ -36,6 +36,11 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default("7d"),
   ADMIN_EMAIL: z.string().email().optional(),
   ADMIN_PASSWORD: z.string().min(8).optional(),
+  DISABLE_DAILY_EMAIL: z
+    .string()
+    .optional()
+    .transform((v) => v !== "false" && v !== "0"),
+  SCRAPE_LOOKBACK_DAYS: z.coerce.number().int().positive().max(90).default(7),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -1,0 +1,99 @@
+[
+  {
+    "name": "Jackson",
+    "state": "MO",
+    "publicsearch_slug": "jackson",
+    "publicsearch_state": "mo",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"]
+  },
+  {
+    "name": "Clay",
+    "state": "MO",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"]
+  },
+  {
+    "name": "Platte",
+    "state": "MO",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"]
+  },
+  {
+    "name": "Cass",
+    "state": "MO",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"]
+  },
+  {
+    "name": "Hamilton",
+    "state": "OH",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"]
+  },
+  {
+    "name": "Jefferson",
+    "state": "AL",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"]
+  },
+  {
+    "name": "Madison",
+    "state": "AL",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"]
+  },
+  {
+    "name": "Shelby",
+    "state": "AL",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"]
+  },
+  {
+    "name": "Morgan",
+    "state": "AL",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"]
+  },
+  {
+    "name": "Limestone",
+    "state": "AL",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"]
+  },
+  {
+    "name": "Montgomery",
+    "state": "AL",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"]
+  },
+  {
+    "name": "Autauga",
+    "state": "AL",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"]
+  },
+  {
+    "name": "Elmore",
+    "state": "AL",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"]
+  },
+  {
+    "name": "Horry",
+    "state": "SC",
+    "lead_types": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "Foreclosure"]
+  },
+  {
+    "name": "Georgetown",
+    "state": "SC",
+    "lead_types": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "Foreclosure"]
+  },
+  {
+    "name": "Marion",
+    "state": "SC",
+    "lead_types": ["Pre-Foreclosure", "Tax Delinquent", "Sheriff Sale", "Probate", "Foreclosure"]
+  },
+  {
+    "name": "Dane",
+    "state": "WI",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "FSBO"]
+  },
+  {
+    "name": "Rock",
+    "state": "WI",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "FSBO"]
+  },
+  {
+    "name": "Door",
+    "state": "WI",
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "FSBO"]
+  }
+]

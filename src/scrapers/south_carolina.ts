@@ -14,7 +14,7 @@
 
 import * as cheerio from "cheerio";
 import { filterLeadsByTypes, normalizeLeadTypes } from "../config/county-lead-types.js";
-import { Lead, makeId, formatDate, fetchWithRetry } from "./base.js";
+import { Lead, makeId, formatDate, fetchWithRetry, settleScraperResults } from "./base.js";
 
 const STATE = "SC";
 
@@ -661,6 +661,7 @@ export async function scrapeSC(
   fromDate: string,
   toDate: string,
   leadTypes?: string[],
+  scraperErrors?: string[],
 ): Promise<Lead[]> {
   const norm = county.toLowerCase();
   const types = leadTypes?.length ? normalizeLeadTypes(leadTypes) : null;
@@ -678,11 +679,13 @@ export async function scrapeSC(
 
   switch (norm) {
     case "horry": {
-      const fns = Object.entries(horryRunners)
-        .filter(([type]) => wants(type))
-        .map(([, fn]) => fn);
-      const results = await Promise.allSettled(fns.map((fn) => fn()));
-      leads = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+      const entries = Object.entries(horryRunners).filter(([type]) => wants(type));
+      const results = await Promise.allSettled(entries.map(([, fn]) => fn()));
+      leads = settleScraperResults(
+        results,
+        entries.map(([t]) => `Horry SC ${t}`),
+        scraperErrors,
+      );
       break;
     }
     case "georgetown":

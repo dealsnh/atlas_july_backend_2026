@@ -287,3 +287,105 @@ export async function getLatestScrapeRunId(): Promise<number | null> {
   );
   return row?.id ?? null;
 }
+
+export async function countPendingRawLeads(filters: {
+  county?: string;
+  state?: string;
+  lead_type?: string;
+  from_date?: string;
+  to_date?: string;
+}): Promise<number> {
+  let sql = `
+    SELECT COUNT(*)::int AS c FROM raw_leads r
+    WHERE r.promoted_to_lead = FALSE
+      AND NOT EXISTS (SELECT 1 FROM leads l WHERE l.id = r.id)
+  `;
+  const params: unknown[] = [];
+  let i = 1;
+
+  if (filters.county) {
+    sql += ` AND r.county ILIKE $${i++}`;
+    params.push(filters.county);
+  }
+  if (filters.state) {
+    sql += ` AND r.state = $${i++}`;
+    params.push(filters.state);
+  }
+  if (filters.lead_type) {
+    sql += ` AND r.lead_type = $${i++}`;
+    params.push(filters.lead_type);
+  }
+  if (filters.from_date) {
+    sql += ` AND r.scraped_at >= $${i++}::date`;
+    params.push(filters.from_date);
+  }
+  if (filters.to_date) {
+    sql += ` AND r.scraped_at < ($${i++}::date + INTERVAL '1 day')`;
+    params.push(filters.to_date);
+  }
+
+  const row = await queryOne<{ c: number }>(sql, params);
+  return row?.c ?? 0;
+}
+
+export async function getPendingRawByCounty(): Promise<
+  Array<{ county: string; state: string; count: number }>
+> {
+  return query<{ county: string; state: string; count: number }>(
+    `
+    SELECT r.county, r.state, COUNT(*)::int AS count
+    FROM raw_leads r
+    WHERE r.promoted_to_lead = FALSE
+      AND NOT EXISTS (SELECT 1 FROM leads l WHERE l.id = r.id)
+    GROUP BY r.county, r.state
+    ORDER BY count DESC
+  `,
+  );
+}
+
+export async function findPendingRawLeads(filters: {
+  county?: string;
+  state?: string;
+  lead_type?: string;
+  from_date?: string;
+  to_date?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<RawLead[]> {
+  let sql = `
+    SELECT r.id, r.scrape_run_id, r.county, r.state, r.lead_type,
+           r.owner_name, r.address, r.city, r.zip, r.description, r.source_url, r.raw_data,
+           r.promoted_to_lead, r.reject_reason, r.scraped_at
+    FROM raw_leads r
+    WHERE r.promoted_to_lead = FALSE
+      AND NOT EXISTS (SELECT 1 FROM leads l WHERE l.id = r.id)
+  `;
+  const params: unknown[] = [];
+  let i = 1;
+
+  if (filters.county) {
+    sql += ` AND r.county ILIKE $${i++}`;
+    params.push(filters.county);
+  }
+  if (filters.state) {
+    sql += ` AND r.state = $${i++}`;
+    params.push(filters.state);
+  }
+  if (filters.lead_type) {
+    sql += ` AND r.lead_type = $${i++}`;
+    params.push(filters.lead_type);
+  }
+  if (filters.from_date) {
+    sql += ` AND r.scraped_at >= $${i++}::date`;
+    params.push(filters.from_date);
+  }
+  if (filters.to_date) {
+    sql += ` AND r.scraped_at < ($${i++}::date + INTERVAL '1 day')`;
+    params.push(filters.to_date);
+  }
+
+  sql += ` ORDER BY r.scraped_at DESC LIMIT $${i} OFFSET $${i + 1}`;
+  params.push(filters.limit ?? 500, filters.offset ?? 0);
+
+  return query<RawLead>(sql, params);
+}

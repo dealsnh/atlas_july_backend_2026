@@ -9,6 +9,7 @@ export const leadsQuerySchema = z.object({
   to_date: z.string().optional(),
   limit: z.coerce.number().int().positive().max(5000).optional(),
   offset: z.coerce.number().int().min(0).optional(),
+  include_pending: z.enum(["true", "false"]).optional(),
 });
 
 export const updateLeadSchema = z.object({

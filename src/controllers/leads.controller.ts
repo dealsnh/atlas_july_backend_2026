@@ -1,6 +1,5 @@
 import type { Request, Response } from "express";
-import { exportLeadsCsv, listLeads, patchLead } from "../services/leads.service.js";
-import { ApiError } from "../utils/api-error.js";
+import { exportLeadsCsv, listLeads, patchLead, skipTraceLead } from "../services/leads.service.js";
 import { successResponse } from "../utils/api-response.js";
 
 export async function listLeadsHandler(req: Request, res: Response): Promise<void> {
@@ -23,6 +22,8 @@ export async function updateLeadHandler(req: Request, res: Response): Promise<vo
   successResponse(res, 200, undefined, { ok: true });
 }
 
-export async function skipTraceHandler(_req: Request, _res: Response): Promise<void> {
-  throw ApiError.notImplemented("Skip trace is disabled for now.");
+export async function skipTraceHandler(req: Request, res: Response): Promise<void> {
+  const id = req.params.id as string;
+  const result = await skipTraceLead(id);
+  successResponse(res, 200, undefined, { ok: true, ...result });
 }

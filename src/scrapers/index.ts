@@ -190,7 +190,7 @@ export async function runAllScrapers(
         const types = county.leadTypes ?? [];
         try {
           onProgress?.(`Scraping ${name}, MO (${types.join(", ")})...`);
-          const leads = await missouri.scrapeCounty(name, fromDate, toDate, types);
+          const leads = await missouri.scrapeCounty(name, fromDate, toDate, types, errors);
           allLeads.push(...leads);
           stateLeads.push(...leads);
           onProgress?.(`✓ ${name} MO: ${leads.length} leads`);
@@ -210,7 +210,7 @@ export async function runAllScrapers(
         const types = county.leadTypes ?? [];
         try {
           onProgress?.(`Scraping ${name}, WI (${types.join(", ")})...`);
-          const leads = await wisconsin.scrapeCounty(name, fromDate, toDate, types);
+          const leads = await wisconsin.scrapeCounty(name, fromDate, toDate, types, errors);
           allLeads.push(...leads);
           stateLeads.push(...leads);
           onProgress?.(`✓ ${name} WI: ${leads.length} leads`);
@@ -244,11 +244,11 @@ export async function runAllScrapers(
         let leads: Lead[] = [];
 
         if (state === "AL") {
-          leads = await alabama.scrapeAlabama(name, fromDate, toDate, types);
+          leads = await alabama.scrapeAlabama(name, fromDate, toDate, types, errors);
         } else if (state === "OH") {
-          leads = await ohio.scrapeOhio(name, fromDate, toDate, types);
+          leads = await ohio.scrapeOhio(name, fromDate, toDate, types, errors);
         } else if (state === "SC") {
-          leads = await southCarolina.scrapeSC(name, fromDate, toDate, types);
+          leads = await southCarolina.scrapeSC(name, fromDate, toDate, types, errors);
         } else {
           const msg = `No scraper registered for ${name}, ${county.state}`;
           errors.push(msg);

@@ -306,3 +306,24 @@ export interface CountyConfig {
   publicsearch_slug?: string;
   publicsearch_state?: string;
 }
+
+/** Collect leads from parallel scrapers; surface rejected promises into errors[]. */
+export function settleScraperResults(
+  results: PromiseSettledResult<Lead[]>[],
+  labels: string[],
+  errors?: string[],
+): Lead[] {
+  const leads: Lead[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    const label = labels[i] ?? `scraper-${i}`;
+    if (result.status === "fulfilled") {
+      leads.push(...result.value);
+    } else {
+      const msg = `${label}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`;
+      console.error(`[scraper] ${msg}`);
+      errors?.push(msg);
+    }
+  }
+  return leads;
+}

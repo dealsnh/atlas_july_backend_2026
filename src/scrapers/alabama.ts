@@ -13,6 +13,7 @@ import {
   fetchWithRetry,
   fetchRendered,
   fetchBlockedPage,
+  settleScraperResults,
 } from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
 import {
@@ -1097,6 +1098,7 @@ export async function scrapeAlabama(
   fromDate: string,
   toDate: string,
   leadTypes?: string[],
+  scraperErrors?: string[],
 ): Promise<Lead[]> {
   const runners: Record<string, () => Promise<Lead[]>> = {
     "Pre-Foreclosure": () => scrapePreForeclosure(county, fromDate, toDate),
@@ -1108,10 +1110,14 @@ export async function scrapeAlabama(
   };
 
   const types = leadTypes?.length ? leadTypes : Object.keys(runners);
-  const fns = types.map((t) => runners[t]).filter(Boolean) as Array<() => Promise<Lead[]>>;
-  const results = await Promise.allSettled(fns.map((fn) => fn()));
+  const entries = types
+    .map((t) => [t, runners[t]] as const)
+    .filter(([, fn]) => Boolean(fn));
+  const results = await Promise.allSettled(entries.map(([, fn]) => fn!()));
 
-  return results
-    .filter((r) => r.status === "fulfilled")
-    .flatMap((r) => (r as PromiseFulfilledResult<Lead[]>).value);
+  return settleScraperResults(
+    results,
+    entries.map(([t]) => `${county} AL ${t}`),
+    scraperErrors,
+  );
 }

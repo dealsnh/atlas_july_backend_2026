@@ -18,6 +18,8 @@
     "test:live": "tsx src/scripts/live-e2e-test.ts",
     "test:frontend": "tsx src/scripts/frontend-e2e-test.ts",
     "test:phase1": "tsx src/scripts/phase1-qa.ts",
+    "report:counties": "tsx src/scripts/county-status-report.ts",
+    "scrape:historical": "tsx src/scripts/run-historical-scrape.ts",
     "reconcile:leads": "tsx src/scripts/reconcile-placeholder-leads.ts"
   },
   "dependencies": {

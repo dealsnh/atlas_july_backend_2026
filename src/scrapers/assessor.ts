@@ -899,6 +899,83 @@ const LOOKUP_MAP: Record<CountyKey, (name: string) => Promise<AssessorProperty[]
   "san-patricio-tx": lookupSanPatricioTX,
 };
 
+const QPUBLIC_ADDRESS: Record<
+  string,
+  { appId: string; layerId: string; pageId: string; state: string }
+> = {
+  "rock-wi": { appId: "1017", layerId: "20421", pageId: "9494", state: "WI" },
+  "door-wi": { appId: "1060", layerId: "21426", pageId: "9872", state: "WI" },
+  "georgetown-sc": { appId: "830", layerId: "14957", pageId: "7084", state: "SC" },
+};
+
+async function lookupAddressByCountyPortal(
+  countyKey: string,
+  state: string,
+  address: string,
+  streetNum: string,
+  streetName: string,
+): Promise<AssessorProperty | null> {
+  const key = `${countyKey}-${state.toLowerCase()}`;
+  const qcfg = QPUBLIC_ADDRESS[key];
+  if (qcfg) {
+    try {
+      const streetPart = address.trim().split(",")[0];
+      const html = await getTextRendered(
+        `https://qpublic.schneidercorp.com/Application.aspx?AppID=${qcfg.appId}&LayerID=${qcfg.layerId}&PageTypeID=4&PageID=${qcfg.pageId}&KeyValue=${encodeURIComponent(streetPart)}`,
+      );
+      const results = parseQPublicResults(html, qcfg.state);
+      const match =
+        results.find((r) =>
+          r.address?.toLowerCase().includes(`${streetNum} ${streetName}`.toLowerCase()),
+        ) ?? results[0];
+      return match ?? null;
+    } catch {
+      /* fall through */
+    }
+  }
+
+  if (countyKey === "dane" && state === "WI") {
+    try {
+      const streetPart = address.trim().split(",")[0];
+      const html = await getText(
+        `https://landonline.countyofdane.com/LandRecords/protected/LRSearch.aspx?searchType=address&address=${encodeURIComponent(streetPart)}`,
+      );
+      const results = parseGenericTable(html, "WI", "Dane County", 2, 3);
+      return results[0] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  if (countyKey === "horry" && state === "SC") {
+    try {
+      const streetPart = address.trim().split(",")[0];
+      const html = await getTextRendered(
+        `https://www.horrycountysc.gov/departments/assessor/property-search/?address=${encodeURIComponent(streetPart)}`,
+      );
+      const results = parseGenericTable(html, "SC", "Horry County", 2, 3);
+      return results[0] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  if (countyKey === "marion" && state === "SC") {
+    try {
+      const streetPart = address.trim().split(",")[0];
+      const html = await getTextRendered(
+        `https://esearch.marioncountysc.com/search/result?keywords=SiteAddress%3A%22${encodeURIComponent(streetPart)}%22`,
+      );
+      const results = parseEsearchResults(html, "SC");
+      return results[0] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Look up the owner of a property by street address in a given county.
  * Used to enrich address-based leads (fire damage, water shutoffs, code violations, vacant/abandoned).
@@ -1041,6 +1118,12 @@ export async function lookupByAddress(
           }
         }
       }
+    } else if (state === "WI") {
+      const match = await lookupAddressByCountyPortal(countyKey, "WI", address, streetNum, streetName);
+      if (match) return match;
+    } else if (state === "SC") {
+      const match = await lookupAddressByCountyPortal(countyKey, "SC", address, streetNum, streetName);
+      if (match) return match;
     }
   } catch {
     // enrichment is best-effort, silently fail

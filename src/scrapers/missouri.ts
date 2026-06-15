@@ -29,6 +29,7 @@ import {
   fetchRendered,
   fetchBlockedPage,
   CountyConfig,
+  settleScraperResults,
 } from "./base.js";
 import {
   collectCraigslistSearchItems,
@@ -1875,6 +1876,7 @@ export async function scrapeCounty(
   fromDate: string,
   toDate: string,
   leadTypes?: string[],
+  scraperErrors?: string[],
 ): Promise<Lead[]> {
   const norm = county.toLowerCase();
 
@@ -1915,22 +1917,27 @@ export async function scrapeCounty(
       : [...Object.keys(outerRunners), "Sheriff Sale", "Tax Delinquent"];
   const wants = (type: string) => types.includes(type);
   const fns: Array<() => Promise<Lead[]>> = [];
+  const labels: string[] = [];
 
   if (
     countyBulk[norm] &&
     (!leadTypes?.length || wants("Sheriff Sale") || wants("Tax Delinquent"))
   ) {
     fns.push(countyBulk[norm]);
+    labels.push(`${county} MO bulk`);
   }
 
   const runners =
     norm === "jackson" ? jacksonRunners : OUTER_MO_COUNTIES.has(norm) ? outerRunners : {};
   for (const [type, fn] of Object.entries(runners)) {
-    if (wants(type)) fns.push(fn);
+    if (wants(type)) {
+      fns.push(fn);
+      labels.push(`${county} MO ${type}`);
+    }
   }
 
   const results = await Promise.allSettled(fns.map((fn) => fn()));
-  let leads = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+  let leads = settleScraperResults(results, labels, scraperErrors);
   if (!county) return leads;
 
   leads = leads.filter((l) => l.county.toLowerCase() === norm);

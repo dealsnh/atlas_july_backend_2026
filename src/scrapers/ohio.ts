@@ -22,7 +22,7 @@
  */
 
 import * as XLSX from "xlsx";
-import { Lead, makeId, formatDate, fetchWithRetry, fetchRendered } from "./base.js";
+import { Lead, makeId, formatDate, fetchWithRetry, fetchRendered, settleScraperResults } from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
 
 // ─── Pre-Foreclosure via Hamilton County Clerk of Courts ──────────────────────
@@ -946,6 +946,7 @@ export async function scrapeOhio(
   fromDate: string,
   toDate: string,
   leadTypes?: string[],
+  scraperErrors?: string[],
 ): Promise<Lead[]> {
   if (county !== "Hamilton") {
     console.log(`[OH] Skipping ${county} — county portal scraper not yet implemented`);
@@ -967,10 +968,14 @@ export async function scrapeOhio(
   };
 
   const types = leadTypes?.length ? leadTypes : Object.keys(runners);
-  const fns = types.map((t) => runners[t]).filter(Boolean) as Array<() => Promise<Lead[]>>;
-  const results = await Promise.allSettled(fns.map((fn) => fn()));
+  const entries = types
+    .map((t) => [t, runners[t]] as const)
+    .filter(([, fn]) => Boolean(fn));
+  const results = await Promise.allSettled(entries.map(([, fn]) => fn!()));
 
-  return results
-    .filter((r) => r.status === "fulfilled")
-    .flatMap((r) => (r as PromiseFulfilledResult<Lead[]>).value);
+  return settleScraperResults(
+    results,
+    entries.map(([t]) => `${county} OH ${t}`),
+    scraperErrors,
+  );
 }

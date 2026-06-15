@@ -31,6 +31,9 @@ export interface Lead {
   scraped_at?: string;
   created_at?: string;
   updated_at?: string;
+  /** Present when merged from raw_leads via include_pending */
+  pipeline_status?: "complete" | "pending";
+  reject_reason?: string | null;
 }
 
 export interface LeadFilters {
@@ -41,6 +44,7 @@ export interface LeadFilters {
   to_date?: string;
   limit?: number;
   offset?: number;
+  include_pending?: boolean | string;
 }
 
 export interface LeadStats {
@@ -49,6 +53,8 @@ export interface LeadStats {
   byCounty: Array<{ county: string; count: number }>;
   today: number;
   lastRun: string | null;
+  pending_raw?: number;
+  pendingByCounty?: Array<{ county: string; state: string; count: number }>;
 }
 
 export interface ScrapeRun {
