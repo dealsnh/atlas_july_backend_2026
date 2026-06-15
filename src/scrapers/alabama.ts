@@ -98,11 +98,12 @@ async function fetchAlTaxHtml(url: string): Promise<string> {
 }
 
 async function fetchAlaCourtHtml(url: string): Promise<string> {
-  let res = await fetchWithRetry(url, { headers: HEADERS });
-  let html = res.ok ? await res.text() : "";
-  if (html.length < 800 || !/<td/i.test(html)) {
-    const rendered = await fetchRendered(url);
-    if (rendered.ok) html = await rendered.text();
+  const html = await fetchBlockedPage(url);
+  const check = validateHtmlResponse(html, "AlaCourt", 800);
+  if (!check.ok) return "";
+  if (!/<td/i.test(html)) {
+    console.warn("[AlaCourt] response has no table cells");
+    return "";
   }
   return html;
 }
@@ -162,7 +163,7 @@ async function scrapePreForeclosure(
         loan_amount: null,
         sale_date: null,
         sale_amount: null,
-        description: caseStyle,
+        description: `${county} County AL Pre-Foreclosure — ${caseStyle}`,
         source_url: `https://v2.alacourt.com/frmPublicCaseSearch.aspx`,
         raw_data: JSON.stringify({ caseStyle }),
       });
@@ -326,7 +327,7 @@ async function scrapeTaxDelinquent(
     Shelby: "https://www.shelbyal.com/departments/revenue/delinquent-tax-list",
     Morgan: "https://www.morgancountyal.gov/departments/revenue",
     Limestone: "https://www.co.limestone.al.us/departments/revenue",
-    Autauga: "https://www.autaugaco.org/departments/revenue",
+    Autauga: "https://www.revenue.alabama.gov/property-tax/delinquent-property-tax-list/?county=Autauga",
     Elmore: "https://www.elmoreco.org/departments/revenue",
   };
   const url =
@@ -421,8 +422,67 @@ async function scrapeTaxDelinquent(
     for (const lead of leads) {
       if (!lead.city) lead.city = inferCityFromAddress(lead.address, county);
     }
-  } catch (_) {
-    /* silent */
+
+    if (!leads.length && urls[county]) {
+      const fallbackUrl = `https://www.revenue.alabama.gov/property-tax/delinquent-property-tax-list/?county=${encodeURIComponent(county)}`;
+      if (fallbackUrl !== url) {
+        const fallbackHtml = await fetchAlTaxHtml(fallbackUrl);
+        if (fallbackHtml) {
+          const fbRows = fallbackHtml.match(rowRe) || [];
+          for (const row of fbRows) {
+            const cells: string[] = [];
+            let m;
+            while ((m = cellRe.exec(row)) !== null) {
+              const text = m[1]
+                .replace(/<[^>]+>/g, " ")
+                .replace(/&nbsp;/gi, " ")
+                .replace(/\s+/g, " ")
+                .trim();
+              cells.push(text);
+            }
+            cellRe.lastIndex = 0;
+            if (cells.length < 2 || !cells[0]) continue;
+            const firstCell = cells[0];
+            if (
+              /courthouse|hours of operation|monday|friday|phone|fax|\d{3}\s*[-.]\s*\d{3}|access denied|permission/i.test(
+                firstCell,
+              )
+            )
+              continue;
+            if (firstCell.length < 3 || firstCell.length > 120) continue;
+            if (!/[A-Za-z]{2,}/.test(firstCell)) continue;
+            const addr = cells[1] || null;
+            leads.push({
+              id: makeId(cells[0], county, "AL", "tax"),
+              county,
+              state: "AL",
+              lead_type: "Tax Delinquent",
+              owner_name: cells[0],
+              address: addr,
+              city: inferCityFromAddress(addr, county),
+              zip: addr?.match(/\b(\d{5})\b/)?.[1] || null,
+              mailing_address: null,
+              mailing_city: null,
+              mailing_state: null,
+              mailing_zip: null,
+              case_number: cells[3] || null,
+              filing_date: formatDate(cells[4]) || new Date().toISOString().split("T")[0],
+              assessed_value: cells[2] || null,
+              tax_year: new Date().getFullYear().toString(),
+              lender: null,
+              loan_amount: null,
+              sale_date: null,
+              sale_amount: null,
+              description: `Tax delinquent — amount: ${cells[2] || "unknown"}`,
+              source_url: fallbackUrl,
+              raw_data: JSON.stringify(cells),
+            });
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error(`[AL ${county}] Tax Delinquent error:`, e);
   }
   return leads;
 }

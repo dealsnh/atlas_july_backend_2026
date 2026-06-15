@@ -618,7 +618,8 @@ async function scrapePlatteCaseNet(
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  if (!html) return leads;
+  const check = validateHtmlResponse(html, `Platte MO Case.net ${leadType}`);
+  if (!check.ok) return leads;
 
   const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
   const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
@@ -634,34 +635,18 @@ async function scrapePlatteCaseNet(
     const caseNum = cells[0];
     const caseName = cells[1];
     const filedDate = cells[2] || fromDate;
-    const owner = parseMOCaseOwner(caseName);
-    if (!owner) continue;
-
-    leads.push({
-      id: makeId(COUNTY, STATE, leadType, `${caseNum}-${owner}`),
-      county: COUNTY,
-      state: STATE,
-      lead_type: leadType,
-      owner_name: owner,
-      address: null,
-      city: "Platte City",
-      zip: null,
-      mailing_address: null,
-      mailing_city: null,
-      mailing_state: null,
-      mailing_zip: null,
-      case_number: caseNum,
-      filing_date: formatDate(filedDate),
-      assessed_value: null,
-      tax_year: null,
-      lender: null,
-      loan_amount: null,
-      sale_date: null,
-      sale_amount: null,
-      description: `Platte County MO ${leadType} — ${caseName}`,
-      source_url: url,
-      raw_data: JSON.stringify({ caseNum, caseName, filedDate }),
-    });
+    leads.push(
+      courtCaseToLead({
+        county: COUNTY,
+        state: STATE,
+        leadType: leadType === "Lis Pendens" ? "Lis Pendens" : "Probate/Estate",
+        caseNum,
+        caseName,
+        filedDate,
+        sourceUrl: url,
+        city: "Platte City",
+      }),
+    );
   }
   return leads;
 }
@@ -905,7 +890,9 @@ async function scrapePlatteCounty(fromDate: string, toDate: string): Promise<Lea
     try {
       const taxUrl = "https://plattecountycollector.com/taxsale6.php";
       const taxHtml = await fetchBlockedPage(taxUrl);
-      if (taxHtml.trim().length > 100) {
+      if (taxHtml.trim().length <= 100) {
+        console.warn("[Platte MO] tax collector returned empty/blocked HTML");
+      } else {
         const $ = cheerio.load(taxHtml);
         $("table tr").each((_, row) => {
           const cells = $(row)
@@ -943,8 +930,8 @@ async function scrapePlatteCounty(fromDate: string, toDate: string): Promise<Lea
           });
         });
       }
-    } catch {
-      /* collector may be empty or TLS-blocked */
+    } catch (e) {
+      console.warn("[Platte MO] tax collector error:", e);
     }
 
     const fsboSearches = [
