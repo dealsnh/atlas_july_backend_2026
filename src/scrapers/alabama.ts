@@ -5,6 +5,7 @@
  */
 
 import * as cheerio from "cheerio";
+import { spawnSync } from "child_process";
 import {
   Lead,
   CountyConfig,
@@ -127,6 +128,28 @@ const CAPTURECAMA_TENANTS: Record<string, string> = {
 };
 const CAPTURECAMA_EXPRESS = "https://prodexpress.capturecama.com";
 
+function fetchCaptureCamaJson<T>(
+  path: string,
+  headers: Record<string, string>,
+  body: Record<string, unknown>,
+): T | null {
+  const url = `${CAPTURECAMA_EXPRESS}${path}`;
+  const args = ["-sS", "-X", "POST", url, "--max-time", "45"];
+  for (const [key, value] of Object.entries(headers)) {
+    args.push("-H", `${key}: ${value}`);
+  }
+  args.push("--data", JSON.stringify(body));
+  const result = spawnSync("curl", args, { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+  const stdout = result.stdout?.trim();
+  if (!stdout) return null;
+  try {
+    return JSON.parse(stdout) as T;
+  } catch {
+    console.warn(`[CaptureCAMA] invalid JSON from ${path}`);
+    return null;
+  }
+}
+
 async function scrapeCaptureCamaDelinquent(county: string, fromDate: string): Promise<Lead[]> {
   const tenantUrl = CAPTURECAMA_TENANTS[county];
   if (!tenantUrl) return [];
@@ -137,13 +160,12 @@ async function scrapeCaptureCamaDelinquent(county: string, fromDate: string): Pr
   };
   const baseBody = { tenantUrl, expressUrl: CAPTURECAMA_EXPRESS, reserved: 0 };
   try {
-    const yearsRes = await fetchWithRetry(`${CAPTURECAMA_EXPRESS}/GetDelqSearchYears`, {
-      method: "POST",
+    const years = fetchCaptureCamaJson<Array<{ RecordYear: string | number }>>(
+      "/GetDelqSearchYears",
       headers,
-      body: JSON.stringify(baseBody),
-    });
-    if (!yearsRes.ok) return [];
-    const years: Array<{ RecordYear: string | number }> = await yearsRes.json();
+      baseBody,
+    );
+    if (!years?.length) return [];
     const recordYears = [
       ...new Set([
         ...years.map((y) => String(y.RecordYear)),
@@ -155,19 +177,17 @@ async function scrapeCaptureCamaDelinquent(county: string, fromDate: string): Pr
     let rows: Array<Record<string, unknown>> = [];
     let usedYear = "";
     for (const recordYear of recordYears) {
-      const searchRes = await fetchWithRetry(`${CAPTURECAMA_EXPRESS}/SearchDelq`, {
-        method: "POST",
+      const data = fetchCaptureCamaJson<Array<Record<string, unknown>>>(
+        "/SearchDelq",
         headers,
-        body: JSON.stringify({
+        {
           ...baseBody,
           searchstring: "",
           searchtype: "4",
           recordyear: recordYear,
-        }),
-      });
-      if (!searchRes.ok) continue;
-      const data = (await searchRes.json()) as Array<Record<string, unknown>>;
-      if (data.length) {
+        },
+      );
+      if (data?.length) {
         rows = data;
         usedYear = recordYear;
         break;
