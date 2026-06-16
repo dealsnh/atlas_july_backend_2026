@@ -135,7 +135,7 @@ function fetchCaptureCamaJson<T>(
 ): T | null {
   const url = `${CAPTURECAMA_EXPRESS}${path}`;
   const runCurl = (proxy?: string): string => {
-    const args = ["-sS", "-X", "POST", url, "--max-time", "45"];
+    const args = ["-sS", "--insecure", "-X", "POST", url, "--max-time", "45"];
     if (proxy) args.push("-x", proxy);
     for (const [key, value] of Object.entries(headers)) {
       args.push("-H", `${key}: ${value}`);
