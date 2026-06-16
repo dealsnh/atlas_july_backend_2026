@@ -134,13 +134,28 @@ function fetchCaptureCamaJson<T>(
   body: Record<string, unknown>,
 ): T | null {
   const url = `${CAPTURECAMA_EXPRESS}${path}`;
-  const args = ["-sS", "-X", "POST", url, "--max-time", "45"];
-  for (const [key, value] of Object.entries(headers)) {
-    args.push("-H", `${key}: ${value}`);
+  const runCurl = (proxy?: string): string => {
+    const args = ["-sS", "-X", "POST", url, "--max-time", "45"];
+    if (proxy) args.push("-x", proxy);
+    for (const [key, value] of Object.entries(headers)) {
+      args.push("-H", `${key}: ${value}`);
+    }
+    args.push("--data", JSON.stringify(body));
+    const result = spawnSync("curl", args, { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+    if (!result.stdout?.trim() && result.stderr?.trim()) {
+      console.warn(`[CaptureCAMA] curl ${path} failed: ${result.stderr.trim().slice(0, 200)}`);
+    }
+    return result.stdout?.trim() || "";
+  };
+
+  let stdout = runCurl();
+  if (!stdout) {
+    const user = process.env.BRIGHT_DATA_USER;
+    const pass = process.env.BRIGHT_DATA_PASS;
+    if (user && pass) {
+      stdout = runCurl(`http://${user}:${pass}@brd.superproxy.io:22225`);
+    }
   }
-  args.push("--data", JSON.stringify(body));
-  const result = spawnSync("curl", args, { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
-  const stdout = result.stdout?.trim();
   if (!stdout) return null;
   try {
     return JSON.parse(stdout) as T;
