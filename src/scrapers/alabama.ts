@@ -144,10 +144,17 @@ async function scrapeCaptureCamaDelinquent(county: string, fromDate: string): Pr
     });
     if (!yearsRes.ok) return [];
     const years: Array<{ RecordYear: string | number }> = await yearsRes.json();
+    const recordYears = [
+      ...new Set([
+        ...years.map((y) => String(y.RecordYear)),
+        String(new Date().getFullYear()),
+        String(new Date().getFullYear() - 1),
+        String(new Date().getFullYear() - 2),
+      ]),
+    ];
     let rows: Array<Record<string, unknown>> = [];
     let usedYear = "";
-    for (const y of years) {
-      const recordYear = String(y.RecordYear);
+    for (const recordYear of recordYears) {
       const searchRes = await fetchWithRetry(`${CAPTURECAMA_EXPRESS}/SearchDelq`, {
         method: "POST",
         headers,
