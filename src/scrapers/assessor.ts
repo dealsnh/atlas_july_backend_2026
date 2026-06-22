@@ -983,3 +983,72 @@ export async function lookupOwnerProperties(
     return [];
   }
 }
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Washington Skip-Trace (Tracerfy) — appended from Jet backend
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function skipTraceOwner(
+  address: string,
+  city: string,
+  state: string,
+  zip?: string,
+): Promise<SkipTraceOwner | null> {
+  const apiKey = process.env.SKIP_TRACE_KEY;
+  if (!apiKey) return null;
+  if (!address || address.trim().length < 5 || !city?.trim() || !state?.trim()) return null;
+
+  const apiUrl = process.env.SKIP_TRACE_API_URL || TRACERFY_DEFAULT_URL;
+  const body: Record<string, unknown> = {
+    address: address.trim(),
+    city: city.trim(),
+    state: state.trim(),
+    find_owner: true,
+  };
+  if (zip?.trim()) body.zip = zip.trim();
+
+  try {
+    const res = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Record<string, unknown>;
+    if (data.hit === false) return null;
+
+    const persons = Array.isArray(data.persons) ? (data.persons as Record<string, unknown>[]) : [];
+    if (!persons.length) return null;
+    const person =
+      persons.find((p) => p && (p as Record<string, unknown>).property_owner === true) ||
+      persons[0];
+
+    const ownerName =
+      str(person.full_name) ||
+      [str(person.first_name), str(person.last_name)].filter(Boolean).join(" ").trim() ||
+      null;
+
+    const m =
+      person.mailing_address && typeof person.mailing_address === "object"
+        ? (person.mailing_address as Record<string, unknown>)
+        : {};
+
+    const result: SkipTraceOwner = {
+      ownerName,
+      mailingAddress: str(m.street),
+      mailingCity: str(m.city),
+      mailingState: str(m.state),
+      mailingZip: str(m.zip),
+    };
+    if (!result.ownerName && !result.mailingAddress) return null;
+    return result;
+  } catch {
+    return null;
+  }
+}
