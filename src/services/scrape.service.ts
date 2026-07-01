@@ -69,73 +69,80 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
   scrapeInProgress = true;
   lastScrapeLog = [];
   let totalNew = 0;
-  const runId = await logScrapeRun(fromDate, toDate);
+  let runId: number | null = null;
 
   const savedIds = new Set<string>();
 
   const saveBatch = async (batch: Parameters<typeof enrichLeads>[0]): Promise<void> => {
     if (!batch.length) return;
 
-    // 1. Persist every scraped row to raw_leads immediately (pre-enrichment snapshot)
-    for (const lead of batch) {
-      await upsertRawLead(runId, lead);
-    }
-
-    // 2. Best-effort enrichment — never blocks promotion
-    const enriched = await enrichLeads(batch, (msg) => {
-      lastScrapeLog.push(msg);
-      logger.info({ msg }, "Enrichment progress");
-    });
-
-    let batchNew = 0;
-    let batchSkipped = 0;
-    let batchPartial = 0;
-
-    for (const lead of enriched) {
-      if (savedIds.has(lead.id)) {
-        await finalizeRawLead(runId, lead, {
-          promoted: false,
-          rejectReason: RAW_REJECT_REASON.DUPLICATE_IN_BATCH,
-        });
-        continue;
+    try {
+      // 1. Persist every scraped row to raw_leads immediately (pre-enrichment snapshot)
+      for (const lead of batch) {
+        await upsertRawLead(runId!, lead);
       }
 
-      if (!isLeadSaveable(lead)) {
-        batchSkipped++;
-        await finalizeRawLead(runId, lead, {
-          promoted: false,
-          rejectReason: resolveRejectReason(lead),
-        });
-        continue;
+      // 2. Best-effort enrichment — never blocks promotion
+      const enriched = await enrichLeads(batch, (msg) => {
+        lastScrapeLog.push(msg);
+        logger.info({ msg }, "Enrichment progress");
+      });
+
+      let batchNew = 0;
+      let batchSkipped = 0;
+      let batchPartial = 0;
+
+      for (const lead of enriched) {
+        if (savedIds.has(lead.id)) {
+          await finalizeRawLead(runId!, lead, {
+            promoted: false,
+            rejectReason: RAW_REJECT_REASON.DUPLICATE_IN_BATCH,
+          });
+          continue;
+        }
+
+        if (!isLeadSaveable(lead)) {
+          batchSkipped++;
+          await finalizeRawLead(runId!, lead, {
+            promoted: false,
+            rejectReason: resolveRejectReason(lead),
+          });
+          continue;
+        }
+
+        if (enrichmentStatus(lead) === "partial") batchPartial++;
+
+        const isNew = await insertLeadIfNotExists(lead as unknown as Record<string, string | null>);
+        if (isNew) {
+          totalNew++;
+          batchNew++;
+          savedIds.add(lead.id);
+          await finalizeRawLead(runId!, lead, { promoted: true, rejectReason: null });
+        } else {
+          await finalizeRawLead(runId!, lead, {
+            promoted: false,
+            rejectReason: RAW_REJECT_REASON.DUPLICATE,
+          });
+        }
       }
 
-      if (enrichmentStatus(lead) === "partial") batchPartial++;
-
-      const isNew = await insertLeadIfNotExists(lead as unknown as Record<string, string | null>);
-      if (isNew) {
-        totalNew++;
-        batchNew++;
-        savedIds.add(lead.id);
-        await finalizeRawLead(runId, lead, { promoted: true, rejectReason: null });
-      } else {
-        await finalizeRawLead(runId, lead, {
-          promoted: false,
-          rejectReason: RAW_REJECT_REASON.DUPLICATE,
-        });
+      if (batchNew > 0) {
+        lastScrapeLog.push(
+          `✓ ${batchNew} leads saved to DB (${totalNew} total${batchPartial ? `, ${batchPartial} partial enrichment` : ""})`,
+        );
       }
-    }
-
-    if (batchNew > 0) {
-      lastScrapeLog.push(
-        `✓ ${batchNew} leads saved to DB (${totalNew} total${batchPartial ? `, ${batchPartial} partial enrichment` : ""})`,
-      );
-    }
-    if (batchSkipped > 0) {
-      lastScrapeLog.push(`⚠ ${batchSkipped} rows lacked minimum identity + location`);
+      if (batchSkipped > 0) {
+        lastScrapeLog.push(`⚠ ${batchSkipped} rows lacked minimum identity + location`);
+      }
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error({ err: error }, `Error saving lead batch: ${errMsg}`);
+      lastScrapeLog.push(`✗ Error saving batch of ${batch.length} leads: ${errMsg}`);
     }
   };
 
   try {
+    runId = await logScrapeRun(fromDate, toDate);
     const counties = buildCountyConfigs();
     const { errors } = await runAllScrapers(
       counties,
@@ -165,7 +172,9 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
     logger.info({ totalNew }, "Scrape complete");
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    await finishScrapeRun(runId, totalNew, errMsg);
+    if (runId !== null) {
+      await finishScrapeRun(runId, totalNew, errMsg);
+    }
     throw error;
   } finally {
     scrapeInProgress = false;
@@ -176,7 +185,8 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
 
 export function startScrapeJob(fromDate: string, toDate: string): void {
   runScrapeJob(fromDate, toDate).catch((error) => {
-    logger.error({ err: error }, "Background scrape failed");
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error({ err: error }, `Background scrape failed: ${errMsg}`);
   });
 }
 
@@ -211,7 +221,8 @@ export function startDailyCron(): void {
           }
         }
       } catch (error) {
-        logger.error({ err: error }, "Daily scrape failed");
+        const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error({ err: error }, `Daily scrape failed: ${errMsg}`);
       }
     },
     { timezone: "America/Los_Angeles" },
