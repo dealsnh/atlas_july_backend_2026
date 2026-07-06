@@ -57,7 +57,7 @@ const SKIP_SCRAPER_PATTERNS = [
   "data.cincinnati-oh.gov/", // Cincinnati open data — direct JSON
   "16thcircuit.org/", // Jackson MO delinquent land tax — direct ASP pages
   "hcauditor.org", // Hamilton OH auditor XLSX + wedge property search
-  "madisontc.com", // Madison AL tax certificate XLSX
+  "madisontc.com", // NOTE: this is Madison County FLORIDA — disabled as an AL source (see alabama.ts)
   "sheriffclayco.org", // Clay MO sheriff property sales
   "claycountymo.tax", // Clay MO collector tax sale
   "plattecountycollector.com", // Platte MO collector — weak TLS; use fetchBlockedPage
@@ -67,9 +67,8 @@ const SKIP_SCRAPER_PATTERNS = [
   "rlselaw.com", // Rubin Lublin AL property listings
   "jeffcointouch.com", // Jefferson AL portal
   "data.birminghamal.gov", // Jefferson vacant structures
-  "services3.arcgis.com/", // Jackson MO ArcGIS
-  "services.arcgis.com/", // AL county ArcGIS
-  "arcgis/rest/services", // ArcGIS REST queries
+  ".arcgis.com", // all Esri ArcGIS Online SaaS feature services — open APIs, fetch direct
+  "arcgis/rest/services", // on-prem ArcGIS REST queries
   "rss_outside", // PACER RSS — requires direct (no ScraperAPI)
   "ecf.oh", // PACER Ohio — direct RSS works
 ];

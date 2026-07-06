@@ -5,8 +5,28 @@ import * as missouri from "./missouri.js";
 import * as alabama from "./alabama.js";
 import * as ohio from "./ohio.js";
 import { scrapePublicSearchLeads } from "./publicsearch-leads.js";
+import { scrapeRollDerived } from "./roll-leads.js";
 
 const STATE_WIDE_TIMEOUT_MS = 90_000;
+
+/** Roll-derived leads (Out-of-State Owner, Probate/estate) for roll-backed counties. */
+async function scrapeRollDerivedForCounty(
+  county: CountyConfig,
+  onProgress: ((msg: string) => void) | undefined,
+  errors: string[],
+): Promise<Lead[]> {
+  const name = county.name || (county as { county?: string }).county || "";
+  try {
+    const leads = await scrapeRollDerived(name, county.state, county.leadTypes ?? []);
+    if (leads.length) onProgress?.(`✓ roll-derived ${name} ${county.state}: ${leads.length} leads`);
+    return leads;
+  } catch (e) {
+    const msg = `Error scraping roll-derived ${name} ${county.state}: ${(e as Error).message}`;
+    errors.push(msg);
+    onProgress?.(`✗ ${msg}`);
+    return [];
+  }
+}
 
 function countyName(county: CountyConfig): string {
   return county.name || (county as { county?: string }).county || "";
@@ -189,6 +209,12 @@ export async function runAllScrapers(
             allLeads.push(...psLeads);
             await onLeadsBatch?.(psLeads);
           }
+
+          const rollLeads = await scrapeRollDerivedForCounty(county, onProgress, errors);
+          if (rollLeads.length) {
+            allLeads.push(...rollLeads);
+            await onLeadsBatch?.(rollLeads);
+          }
         } catch (e) {
           const msg = `Error scraping ${name} MO: ${(e as Error).message}`;
           errors.push(msg);
@@ -230,6 +256,10 @@ export async function runAllScrapers(
         );
         countyLeads.push(...psLeads);
         allLeads.push(...psLeads);
+
+        const rollLeads = await scrapeRollDerivedForCounty(county, onProgress, errors);
+        countyLeads.push(...rollLeads);
+        allLeads.push(...rollLeads);
 
         if (countyLeads.length) await onLeadsBatch?.(countyLeads);
       } catch (e) {

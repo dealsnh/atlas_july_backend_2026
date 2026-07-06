@@ -33,4 +33,14 @@ describe("resolveRejectReason", () => {
       } as never),
     ).toBe(RAW_REJECT_REASON.MISSING_PROPERTY_LOCATION);
   });
+
+  it("detects missing mailing when owner + situs exist", () => {
+    expect(
+      resolveRejectReason({
+        owner_name: "SMITH JOHN",
+        address: "123 Main St",
+        mailing_address: null,
+      } as never),
+    ).toBe(RAW_REJECT_REASON.MISSING_MAILING_ADDRESS);
+  });
 });

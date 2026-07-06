@@ -317,7 +317,12 @@ async function scrapePreForeclosure(
 }
 
 // ─── Madison AL tax certificates (county XLSX — direct download) ─────────────
-const MADISON_CERT_XLSX = "https://madisontc.com/s/MadisonCountyCertificates-tshc.xlsx";
+// WRONG-COUNTY GUARD: the previously hardcoded https://madisontc.com/... file is
+// Madison County *FLORIDA* (situs MADISON/GREENVILLE/LEE/LAMONT FL, 94% FL mailing) —
+// NOT Madison County, Alabama (Huntsville). Using it emitted Florida leads for an AL
+// client. Source is now env-driven and DISABLED by default; set MADISON_AL_TAX_XLSX to
+// a verified Madison County ALABAMA delinquent list to re-enable.
+const MADISON_CERT_XLSX = process.env.MADISON_AL_TAX_XLSX || "";
 
 function trimCell(v: unknown): string {
   return String(v ?? "")
@@ -352,6 +357,7 @@ function excelDateToIso(value: unknown): string | null {
 }
 
 async function fetchMadisonCertificateRows(): Promise<Record<string, unknown>[]> {
+  if (!MADISON_CERT_XLSX) return []; // disabled until a real Madison County AL source is set
   try {
     const res = await fetchWithRetry(MADISON_CERT_XLSX, {
       headers: {
@@ -391,7 +397,7 @@ async function scrapeMadisonTaxDelinquent(fromDate: string, toDate: string): Pro
       address,
       city,
       zip: null,
-      mailing_address: trimCell(row["Address"]) || null,
+      mailing_address: trimCell(row["Address_1"]) || null,
       mailing_city: trimCell(row["City"]) || null,
       mailing_state: trimCell(row["St"]) || "AL",
       mailing_zip: row["Zip"] != null ? String(row["Zip"]).slice(0, 5) : null,
@@ -431,7 +437,7 @@ async function scrapeMadisonSheriffSales(fromDate: string, toDate: string): Prom
       address,
       city: trimCell(row["Location City"]) || "Huntsville",
       zip: null,
-      mailing_address: trimCell(row["Address"]) || null,
+      mailing_address: trimCell(row["Address_1"]) || null,
       mailing_city: trimCell(row["City"]) || null,
       mailing_state: trimCell(row["St"]) || "AL",
       mailing_zip: row["Zip"] != null ? String(row["Zip"]).slice(0, 5) : null,

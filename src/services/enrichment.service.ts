@@ -126,11 +126,19 @@ export function hasUsableIdentity(lead: Lead): boolean {
   return false;
 }
 
+/** Real owner name — a person/entity name that is not a placeholder. */
+export function hasRealOwnerName(lead: Lead): boolean {
+  const name = (lead.owner_name || "").trim();
+  return name.length >= 2 && !isPlaceholderOwner(name);
+}
+
 /**
- * Phase 1 save gate: identity + property location required; mailing is optional enrichment.
+ * Save gate (strict): a promotable lead MUST have all three of
+ * owner name + situs street address + mailing address. Rows missing any are
+ * not skip-traceable — they stay in raw_leads and are never promoted to `leads`.
  */
 export function isLeadSaveable(lead: Lead): boolean {
-  return hasUsableIdentity(lead) && hasUsablePropertyLocation(lead);
+  return hasRealOwnerName(lead) && isValidStreetAddress(lead.address) && hasMailingAddress(lead);
 }
 
 /** complete = street address + real owner; partial = saved but missing enriched fields. */
@@ -140,7 +148,7 @@ export function enrichmentStatus(lead: Lead): "complete" | "partial" {
   return hasOwner && hasStreet ? "complete" : "partial";
 }
 
-function hasMailingAddress(lead: Lead): boolean {
+export function hasMailingAddress(lead: Lead): boolean {
   return (lead.mailing_address || "").trim().length >= 5;
 }
 
@@ -217,6 +225,11 @@ async function lookupByAddressVariants(
 }
 
 async function enrichOne(lead: Lead): Promise<Lead> {
+  // Already complete (real owner + situs street + mailing) — e.g. roll-derived leads
+  // come straight from the authoritative assessment roll. Re-querying risks a fuzzy
+  // address match overwriting correct owner/mailing with the wrong parcel; skip it.
+  if (isLeadSaveable(lead)) return { ...lead };
+
   const county = lead.county;
   const state = lead.state;
   let current = { ...lead };
@@ -268,6 +281,19 @@ async function enrichOne(lead: Lead): Promise<Lead> {
     }
   } catch (error) {
     logger.debug({ leadId: lead.id, err: error }, "Assessor enrichment failed");
+  }
+
+  // Guaranteed mailing backfill: a lead with a valid situs but no separate mailing
+  // is mailable at the property itself. Runs even if the assessor lookup above threw,
+  // so the strict save gate never drops an otherwise-complete owner+situs lead.
+  if (!hasMailingAddress(current) && isValidStreetAddress(current.address)) {
+    current = {
+      ...current,
+      mailing_address: current.address,
+      mailing_city: current.mailing_city || current.city,
+      mailing_state: current.mailing_state || state,
+      mailing_zip: current.mailing_zip || current.zip || null,
+    };
   }
 
   if (isPlaceholderOwner(current.owner_name)) {

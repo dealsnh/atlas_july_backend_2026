@@ -11,6 +11,7 @@
  * Only leads where at least one property address is found are saved to the DB.
  */
 
+import { spawnSync } from "child_process";
 import { fetchWithRetry, fetchRendered } from "./base.js";
 
 export interface AssessorProperty {
@@ -54,6 +55,437 @@ async function getText(url: string, options: RequestInit = {}): Promise<string> 
 async function getTextRendered(url: string): Promise<string> {
   const res = await fetchRendered(url);
   return res.text();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared parcel-roll query helper (the universal lead completer)
+//
+// One generic ArcGIS FeatureServer adapter drives every county whose public
+// assessment roll exposes owner name + situs address + owner MAILING address.
+// Each endpoint below was validated LIVE (owner-name query AND address query
+// returning a real record). Source URLs are env-overridable so a stale snapshot
+// can be swapped without a code change.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface RollSpec {
+  urls: string[];
+  ownerField: string;
+  /** Situs from a single display field, or number + street-name parts. */
+  situsDisplayField?: string;
+  situsNumField?: string;
+  situsStreetField?: string;
+  situsSuffixField?: string;
+  situsCityField?: string;
+  situsZipField?: string;
+  /** Mailing (owner) address line fields, in order. */
+  mailFields: string[];
+  mailCityField?: string;
+  mailStateField?: string;
+  mailZipField?: string;
+  parcelIdField?: string;
+  defaultCity: string;
+  state: string;
+}
+
+const env = (name: string, fallback: string): string =>
+  (process.env[name] && String(process.env[name]).trim()) || fallback;
+
+const ROLL_SPECS: Record<string, RollSpec> = {
+  // Clay County MO — official county GIS parcel service (98k parcels).
+  "clay-mo": {
+    urls: [
+      env(
+        "CLAY_PARCEL_QUERY_URL",
+        "https://services7.arcgis.com/3c8lLdmDNevrTlaV/ArcGIS/rest/services/ClayCountyParcelService/FeatureServer/0/query",
+      ),
+    ],
+    ownerField: "current_owner",
+    situsDisplayField: "situs_display",
+    situsNumField: "situs_num",
+    situsStreetField: "situs_st_name",
+    situsCityField: "situs_city",
+    situsZipField: "situs_zip",
+    mailFields: ["owner_addr_1", "owner_addr_2"],
+    mailCityField: "owner_city",
+    mailStateField: "owner_state",
+    mailZipField: "owner_zip",
+    parcelIdField: "parcel_id",
+    defaultCity: "Liberty",
+    state: "MO",
+  },
+  // Platte County MO — Parkville-hosted county-wide parcels (45k, whole county).
+  "platte-mo": {
+    urls: [
+      env(
+        "PLATTE_PARCEL_QUERY_URL",
+        "https://services.arcgis.com/KP64F8Xif9MkUwD4/arcgis/rest/services/Parkville_Parcels_2024/FeatureServer/0/query",
+      ),
+    ],
+    ownerField: "DEEDHOLDER",
+    situsNumField: "HOUSENUM",
+    situsStreetField: "ADDRESS",
+    mailFields: ["Mailing_ad", "Mailing__1"],
+    mailCityField: "Mailing__2",
+    mailStateField: "Mailing__3",
+    mailZipField: "Mailing__4",
+    parcelIdField: "Parcel_PIN",
+    defaultCity: "Platte City",
+    state: "MO",
+  },
+  // Cass County MO — partial open coverage (Harrisonville area + Belton).
+  // Raymore + unincorporated Cass are NOT in either open service.
+  "cass-mo": {
+    urls: [
+      env(
+        "CASS_PARCEL_QUERY_URL",
+        "https://services7.arcgis.com/nqa85ZDSsMNrKusD/arcgis/rest/services/County_Parcels/FeatureServer/0/query",
+      ),
+      env(
+        "CASS_BELTON_PARCEL_QUERY_URL",
+        "https://services6.arcgis.com/ZxotJxQo35Sx0jNg/arcgis/rest/services/Belton_Parcels/FeatureServer/49/query",
+      ),
+    ],
+    ownerField: "DeedHold",
+    situsNumField: "HseNum",
+    situsStreetField: "Address",
+    situsCityField: "City",
+    situsZipField: "Zip",
+    mailFields: ["MailAdd1", "MailAdd2"],
+    mailCityField: "MailCity",
+    mailStateField: "MailStat",
+    mailZipField: "MailZip",
+    parcelIdField: "PARCELID",
+    defaultCity: "Harrisonville",
+    state: "MO",
+  },
+  // Hamilton County OH — CAGIS parcel data (owner+situs+true mailing).
+  // The auditor "wedge" JSON endpoint was retired (results_ajax → 404); this
+  // ArcGIS mirror is the verified keyless replacement. Dated snapshot → env-swappable.
+  "hamilton-oh": {
+    urls: [
+      env(
+        "HAMILTON_PARCEL_QUERY_URL",
+        "https://services8.arcgis.com/YU1yCuZZBuqsMM2h/arcgis/rest/services/Parcel_Polygons_20241008/FeatureServer/0/query",
+      ),
+    ],
+    ownerField: "OWNNM1",
+    situsNumField: "ADDRNO",
+    situsStreetField: "ADDRST",
+    situsSuffixField: "ADDRSF",
+    // OWNAD2 is the "CITY ST ZIP" line (captured separately) — keep only the street line.
+    mailFields: ["OWNAD1"],
+    mailCityField: "OWNADCITY",
+    mailStateField: "OWNADSTATE",
+    mailZipField: "OWNADZIP",
+    parcelIdField: "PARCELID",
+    defaultCity: "Cincinnati",
+    state: "OH",
+  },
+};
+
+function rollSpecKey(county: string, state: string): string {
+  return `${county
+    .toLowerCase()
+    .replace(/\s+county$/i, "")
+    .replace(/\s+/g, "-")}-${state.toLowerCase()}`;
+}
+
+function s(v: unknown): string {
+  return v == null ? "" : String(v).replace(/\s+/g, " ").trim();
+}
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&amp;/gi, "&")
+    .replace(/&#38;/g, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function rollOutFields(spec: RollSpec): string {
+  const fields = [
+    spec.ownerField,
+    spec.situsDisplayField,
+    spec.situsNumField,
+    spec.situsStreetField,
+    spec.situsSuffixField,
+    spec.situsCityField,
+    spec.situsZipField,
+    ...spec.mailFields,
+    spec.mailCityField,
+    spec.mailStateField,
+    spec.mailZipField,
+    spec.parcelIdField,
+  ].filter(Boolean) as string[];
+  return [...new Set(fields)].join(",");
+}
+
+function buildSitus(attrs: Record<string, unknown>, spec: RollSpec): string {
+  if (spec.situsDisplayField) {
+    // Some display fields append the state and/or zip — strip it to a clean street line.
+    const disp = s(attrs[spec.situsDisplayField])
+      .replace(/[,\s]+(MO|OH|AL)\s*(\d{5}(-\d{4})?)?\s*$/i, "")
+      .trim();
+    if (disp && /^\d/.test(disp)) return disp;
+  }
+  const parts = [
+    spec.situsNumField ? s(attrs[spec.situsNumField]) : "",
+    spec.situsStreetField ? s(attrs[spec.situsStreetField]) : "",
+    spec.situsSuffixField ? s(attrs[spec.situsSuffixField]) : "",
+  ].filter(Boolean);
+  return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function mapRollFeature(attrs: Record<string, unknown>, spec: RollSpec): AssessorProperty | null {
+  const owner = decodeHtmlEntities(s(attrs[spec.ownerField]));
+  const situs = buildSitus(attrs, spec);
+  // Require a real owner name and a situs that begins with a house number.
+  if (!owner || !/^\d+\s+\S/.test(situs)) return null;
+  const mailing = spec.mailFields
+    .map((f) => s(attrs[f]))
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  return {
+    address: situs,
+    city: (spec.situsCityField && s(attrs[spec.situsCityField])) || spec.defaultCity,
+    state: spec.state,
+    zip: (spec.situsZipField && s(attrs[spec.situsZipField]).slice(0, 5)) || undefined,
+    parcelId: (spec.parcelIdField && s(attrs[spec.parcelIdField])) || undefined,
+    ownerName: owner,
+    mailingAddress: mailing || undefined,
+    mailingCity: (spec.mailCityField && s(attrs[spec.mailCityField])) || undefined,
+    mailingState: (spec.mailStateField && s(attrs[spec.mailStateField])) || spec.state,
+    mailingZip: (spec.mailZipField && s(attrs[spec.mailZipField]).slice(0, 5)) || undefined,
+  };
+}
+
+async function queryRoll(spec: RollSpec, where: string, limit = 5): Promise<AssessorProperty[]> {
+  const out: AssessorProperty[] = [];
+  for (const base of spec.urls) {
+    try {
+      const qUrl = new URL(base);
+      qUrl.searchParams.set("where", where);
+      qUrl.searchParams.set("outFields", rollOutFields(spec));
+      qUrl.searchParams.set("returnGeometry", "false");
+      qUrl.searchParams.set("resultRecordCount", String(limit));
+      qUrl.searchParams.set("f", "json");
+      const res = await fetchWithRetry(qUrl.toString());
+      if (!res.ok) continue;
+      const data = (await res.json()) as { features?: { attributes: Record<string, unknown> }[] };
+      for (const f of data.features || []) {
+        const mapped = mapRollFeature(f.attributes, spec);
+        if (mapped) out.push(mapped);
+      }
+      if (out.length >= limit) break;
+    } catch {
+      /* try next endpoint */
+    }
+  }
+  return out.slice(0, limit);
+}
+
+/** Owner-name → complete properties (situs + mailing) from the county roll. */
+async function rollLookupByOwner(spec: RollSpec, ownerName: string): Promise<AssessorProperty[]> {
+  const { last } = parseName(ownerName);
+  if (!last || last.length < 2) return [];
+  const safe = last.toUpperCase().replace(/'/g, "''");
+  return queryRoll(spec, `UPPER(${spec.ownerField}) LIKE '%${safe}%'`, 5);
+}
+
+/** Situs address → owner + mailing from the county roll (conservative match). */
+async function rollLookupByAddress(
+  spec: RollSpec,
+  streetNum: string,
+  streetRest: string,
+): Promise<AssessorProperty | null> {
+  const rest = streetRest.toUpperCase().replace(/'/g, "''").trim();
+  const firstTok = rest.split(/\s+/).filter(Boolean)[0] || rest;
+  if (!streetNum || !firstTok) return null;
+
+  const where = spec.situsDisplayField
+    ? `UPPER(${spec.situsDisplayField}) LIKE '${streetNum} %${firstTok}%'`
+    : `${spec.situsNumField}='${streetNum}' AND UPPER(${spec.situsStreetField}) LIKE '%${firstTok}%'`;
+
+  const results = await queryRoll(spec, where, 8);
+  // Conservative: keep only rows whose situs starts with the same house number
+  // and whose street contains the first significant token — else skip (no guess).
+  const match = results.find((r) => {
+    const situs = r.address.toUpperCase();
+    return situs.startsWith(`${streetNum} `) && situs.includes(firstTok);
+  });
+  return match || null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// E-Ring "Citizen Access Portal" roll (CaptureCAMA family) — Alabama counties
+//
+// POST {express}/SearchRP returns owner + situs + mailing (+ class/tax fields) in
+// ONE record, queryable by owner name (searchtype=1) or situs address (4). These
+// hosts serve JSON directly to datacenter IPs (Jefferson's E-Ring express even
+// bypasses the gis.jccal.org Imperva WAF). Validated live per county.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ERingTenant {
+  tenant: string;
+  express: string;
+  defaultCity: string;
+  /** Express host blocks datacenter IPs — go straight through Bright Data. */
+  proxyOnly?: boolean;
+}
+
+const ERING_TENANTS: Record<string, ERingTenant> = {
+  "autauga-al": {
+    tenant: env("AUTAUGA_ERING_TENANT", "https://autauga.capturecama.com"),
+    express: env("AUTAUGA_ERING_EXPRESS", "https://prodexpress.capturecama.com"),
+    defaultCity: "Prattville",
+  },
+  "elmore-al": {
+    tenant: env("ELMORE_ERING_TENANT", "https://elmorerevenuecommissioner.net"),
+    express: env("ELMORE_ERING_EXPRESS", "https://prodexpress.capturecama.com"),
+    defaultCity: "Wetumpka",
+  },
+  "jefferson-al": {
+    tenant: env("JEFFERSON_ERING_TENANT", "https://eringcapture.jccal.org"),
+    express: env("JEFFERSON_ERING_EXPRESS", "https://jeffersonexpress.capturecama.com"),
+    defaultCity: "Birmingham",
+  },
+  "shelby-al": {
+    tenant: env("SHELBY_ERING_TENANT", "https://ptc.shelbyal.com"),
+    express: env("SHELBY_ERING_EXPRESS", "https://ptcexpress.shelbyal.com"),
+    defaultCity: "Columbiana",
+  },
+  "morgan-al": {
+    tenant: env("MORGAN_ERING_TENANT", "https://morgan.capturecama.com"),
+    express: env("MORGAN_ERING_EXPRESS", "https://prodexpress.capturecama.com"),
+    defaultCity: "Decatur",
+  },
+  // Limestone's express host blocks datacenter IPs → residential proxy only.
+  // NOTE: never route Limestone's tenantUrl through prodexpress — it silently
+  // falls back to a DEFAULT tenant (Monroe County) and returns wrong-county data.
+  "limestone-al": {
+    tenant: env("LIMESTONE_ERING_TENANT", "https://limestonerevenue.net"),
+    express: env("LIMESTONE_ERING_EXPRESS", "https://express.limestonerevenue.net"),
+    defaultCity: "Athens",
+    proxyOnly: true,
+  },
+};
+
+function eRingRecordYear(): number {
+  return new Date().getFullYear();
+}
+
+/** POST to an E-Ring express host via curl (--insecure like the county TLS quirk), Bright Data fallback. */
+function fetchERingJson<T>(
+  express: string,
+  path: string,
+  body: Record<string, unknown>,
+  proxyOnly = false,
+): T | null {
+  const url = `${express}${path}`;
+  const runCurl = (proxy?: string): string => {
+    const args = ["-sS", "--insecure", "-X", "POST", url, "--max-time", "25"];
+    if (proxy) args.push("-x", proxy);
+    args.push(
+      "-H",
+      "Content-Type: application/json",
+      "-H",
+      "Accept: application/json",
+      "-H",
+      "Referring-Page: propsearch",
+      "--data",
+      JSON.stringify(body),
+    );
+    const result = spawnSync("curl", args, { encoding: "utf8", maxBuffer: 12 * 1024 * 1024 });
+    return result.stdout?.trim() || "";
+  };
+  const user = process.env.BRIGHT_DATA_USER;
+  const pass = process.env.BRIGHT_DATA_PASS;
+  const proxy = user && pass ? `http://${user}:${pass}@brd.superproxy.io:22225` : undefined;
+
+  // proxyOnly hosts block datacenter IPs — skip the (timeout-prone) direct attempt.
+  let stdout = proxyOnly ? (proxy ? runCurl(proxy) : "") : runCurl();
+  if (!stdout && !proxyOnly && proxy) stdout = runCurl(proxy);
+  if (!stdout) return null;
+  try {
+    return JSON.parse(stdout) as T;
+  } catch {
+    return null;
+  }
+}
+
+function mapERingRecord(r: Record<string, unknown>, defaultCity: string): AssessorProperty | null {
+  const owner = decodeHtmlEntities(s(r.MigratedOwners));
+  const situs = s(r.PropAddr1);
+  // Require a real owner name and a house-numbered situs street.
+  if (!owner || !/^\d+\s+\S/.test(situs)) return null;
+  const mailStreet = [s(r.Address1), s(r.Address2)].filter(Boolean).join(" ").trim();
+  return {
+    address: situs,
+    city: s(r.PropCity) || defaultCity,
+    state: "AL",
+    zip: s(r.PropZip).slice(0, 5) || undefined,
+    parcelId: s(r.ParcelNo) || undefined,
+    ownerName: owner,
+    mailingAddress: mailStreet || undefined,
+    mailingCity: s(r.City) || undefined,
+    mailingState: s(r.State) || "AL",
+    mailingZip: s(r.Zip).slice(0, 5) || undefined,
+  };
+}
+
+/** searchtype: 1 = owner name, 4 = property/situs address (both CONTAINS). */
+function queryERing(
+  tenant: ERingTenant,
+  searchstring: string,
+  searchtype: 1 | 4,
+  limit = 8,
+): AssessorProperty[] {
+  const data = fetchERingJson<Array<Record<string, unknown>>>(
+    tenant.express,
+    "/SearchRP",
+    {
+      tenantUrl: tenant.tenant,
+      expressUrl: tenant.express,
+      reserved: 0,
+      searchstring,
+      searchtype,
+      recordyear: eRingRecordYear(),
+    },
+    tenant.proxyOnly,
+  );
+  if (!Array.isArray(data)) return [];
+  const out: AssessorProperty[] = [];
+  for (const r of data.slice(0, 300)) {
+    const mapped = mapERingRecord(r, tenant.defaultCity);
+    if (mapped) out.push(mapped);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function eRingLookupByOwner(tenant: ERingTenant, ownerName: string): AssessorProperty[] {
+  const { last, first } = parseName(ownerName);
+  if (!last || last.length < 2) return [];
+  const q = first ? `${last} ${first}` : last;
+  return queryERing(tenant, q, 1, 5);
+}
+
+function eRingLookupByAddress(
+  tenant: ERingTenant,
+  streetNum: string,
+  streetRest: string,
+): AssessorProperty | null {
+  const firstTok = streetRest.trim().split(/\s+/).filter(Boolean)[0] || "";
+  if (!streetNum || !firstTok) return null;
+  const results = queryERing(tenant, `${streetNum} ${firstTok}`, 4, 8);
+  return (
+    results.find((r) => r.address.toUpperCase().startsWith(`${streetNum} `)) || null
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -835,6 +1267,23 @@ export async function lookupByAddress(
     .toLowerCase()
     .replace(/\s+county$/i, "")
     .replace(/\s+/g, "-");
+
+  // Shared parcel roll first (Clay/Platte/Cass MO, Hamilton OH, …) — the verified
+  // owner+situs+mailing source. Falls through to bespoke per-county paths below.
+  const specKey = rollSpecKey(county, state);
+  const rollSpec = ROLL_SPECS[specKey];
+  if (rollSpec) {
+    const rollMatch = await rollLookupByAddress(rollSpec, streetNum, parts.slice(1).join(" "));
+    if (rollMatch) return rollMatch;
+  }
+
+  // Alabama E-Ring portal roll (situs address → owner + mailing).
+  const eRingAddr = ERING_TENANTS[specKey];
+  if (eRingAddr) {
+    const m = eRingLookupByAddress(eRingAddr, streetNum, parts.slice(1).join(" "));
+    if (m) return m;
+  }
+
   try {
     if (state === "MO") {
       if (countyKey === "jackson") {
@@ -970,11 +1419,33 @@ export async function lookupOwnerProperties(
   state: string,
 ): Promise<AssessorProperty[]> {
   if (!ownerName || ownerName.trim().length < 2) return [];
-  const key = `${county
-    .toLowerCase()
-    .replace(/\s+county$/i, "")
-    .replace(/\s+/g, "-")}-${state.toLowerCase()}` as CountyKey;
-  const fn = LOOKUP_MAP[key];
+  const specKey = rollSpecKey(county, state);
+
+  // Shared parcel roll first — verified owner+situs+mailing source.
+  const rollSpec = ROLL_SPECS[specKey];
+  if (rollSpec) {
+    try {
+      const rollResults = await rollLookupByOwner(rollSpec, ownerName);
+      if (rollResults.length) {
+        return rollResults.filter((r) => r.address && /\d+\s+[A-Za-z]/.test(r.address));
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+
+  // Alabama E-Ring portal roll (owner+situs+mailing in one record).
+  const eRing = ERING_TENANTS[specKey];
+  if (eRing) {
+    try {
+      const r = eRingLookupByOwner(eRing, ownerName);
+      if (r.length) return r.filter((x) => x.address && /\d+\s+[A-Za-z]/.test(x.address));
+    } catch {
+      /* fall through to bespoke lookup */
+    }
+  }
+
+  const fn = LOOKUP_MAP[specKey as CountyKey];
   if (!fn) return [];
   try {
     const results = await fn(ownerName);
@@ -984,71 +1455,104 @@ export async function lookupOwnerProperties(
   }
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Washington Skip-Trace (Tracerfy) — appended from Jet backend
+// Roll-derived lead scans (keyless, always-current, complete owner+situs+mailing)
+// Only for counties whose roll is a queryable ArcGIS FeatureServer (ROLL_SPECS).
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function skipTraceOwner(
-  address: string,
-  city: string,
-  state: string,
-  zip?: string,
-): Promise<SkipTraceOwner | null> {
-  const apiKey = process.env.SKIP_TRACE_KEY;
-  if (!apiKey) return null;
-  if (!address || address.trim().length < 5 || !city?.trim() || !state?.trim()) return null;
+/** Government / municipal / institutional owners — not sellable, excluded from leads. */
+const GOV_OWNER_RE =
+  /\b(CITY OF|COUNTY OF|STATE OF|TOWN OF|VILLAGE OF|UNITED STATES|U\.?S\.?A|HOUSING AUTHORITY|LAND BANK|LAND TRUST|SCHOOL|BOARD OF EDUC|UNIVERSITY|COLLEGE|CHURCH|MINISTR|FIRE DIST|FIRE PROTECT|WATER (DIST|WORKS|AUTH)|SEWER|PARK (DIST|BOARD)|DEPARTMENT OF|COMMISSION|AUTHORITY|CEMETERY|PRESERV|CONSERVAT|MUNICIPAL|REDEVELOP|HABITAT FOR|FANNIE MAE|FREDDIE MAC|FEDERAL (HOME|NATIONAL)|SECRETARY OF|VETERANS AFFAIRS|\bHUD\b|DRAINAGE|LEVEE|LIBRARY|HOSPITAL|FOUNDATION|GAS (CO|COMPANY|& |AND )|ELECTRIC (CO|COMPANY|POWER)|DUKE ENERGY|\bAEP\b|AMERICAN ELECTRIC|ENERGY (CO|CORP|INC|OHIO|LLC|SERVICES)|POWER (CO|COMPANY)|UTILIT|SANITARY|TRANSIT AUTH|PORT AUTH|TURNPIKE|RAILROAD|RAILWAY|\bRR CO|PIPELINE|TELEPHONE|ACADEMY|INSTITUTE|SEMINARY|ARCHDIOCESE|DIOCESE)/i;
 
-  const apiUrl = process.env.SKIP_TRACE_API_URL || TRACERFY_DEFAULT_URL;
-  const body: Record<string, unknown> = {
-    address: address.trim(),
-    city: city.trim(),
-    state: state.trim(),
-    find_owner: true,
-  };
-  if (zip?.trim()) body.zip = zip.trim();
-
-  try {
-    const res = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(60_000),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as Record<string, unknown>;
-    if (data.hit === false) return null;
-
-    const persons = Array.isArray(data.persons) ? (data.persons as Record<string, unknown>[]) : [];
-    if (!persons.length) return null;
-    const person =
-      persons.find((p) => p && (p as Record<string, unknown>).property_owner === true) ||
-      persons[0];
-
-    const ownerName =
-      str(person.full_name) ||
-      [str(person.first_name), str(person.last_name)].filter(Boolean).join(" ").trim() ||
-      null;
-
-    const m =
-      person.mailing_address && typeof person.mailing_address === "object"
-        ? (person.mailing_address as Record<string, unknown>)
-        : {};
-
-    const result: SkipTraceOwner = {
-      ownerName,
-      mailingAddress: str(m.street),
-      mailingCity: str(m.city),
-      mailingState: str(m.state),
-      mailingZip: str(m.zip),
-    };
-    if (!result.ownerName && !result.mailingAddress) return null;
-    return result;
-  } catch {
-    return null;
-  }
+export function isGovernmentOwner(name: string | null | undefined): boolean {
+  const n = (name || "").toUpperCase();
+  return !!n && GOV_OWNER_RE.test(n);
 }
+
+function getRollSpec(county: string, state: string): RollSpec | undefined {
+  return ROLL_SPECS[rollSpecKey(county, state)];
+}
+
+/** Parcel-id → property (true situs + owner + mailing) from a county's ArcGIS roll. */
+export async function lookupByParcel(
+  county: string,
+  state: string,
+  parcelId: string | null | undefined,
+): Promise<AssessorProperty | null> {
+  const spec = getRollSpec(county, state);
+  if (!spec?.parcelIdField || !parcelId) return null;
+  const raw = String(parcelId).replace(/[^0-9A-Za-z]/g, "");
+  const candidates = new Set([String(parcelId).trim(), raw].filter(Boolean));
+  // Hamilton OH: tax-roll parcel (13 digits) → GIS PARCELID = "0" + first 11 digits.
+  if (rollSpecKey(county, state) === "hamilton-oh" && /^\d{13}$/.test(raw)) {
+    candidates.add("0" + raw.slice(0, 11));
+  }
+  for (const c of candidates) {
+    const res = await queryRoll(spec, `${spec.parcelIdField}='${c.replace(/'/g, "''")}'`, 1);
+    if (res[0]) return res[0];
+  }
+  return null;
+}
+
+export function rollSupportsCounty(county: string, state: string): boolean {
+  return !!getRollSpec(county, state);
+}
+
+/** Out-of-State Owner: mailing state ≠ property state (a strong absentee-seller signal). */
+export async function scanOutOfStateOwners(
+  county: string,
+  state: string,
+  limit = 200,
+): Promise<AssessorProperty[]> {
+  const spec = getRollSpec(county, state);
+  if (!spec?.mailStateField) return [];
+  const f = spec.mailStateField;
+  const where = `${f} IS NOT NULL AND ${f} <> '' AND ${f} <> ' ' AND UPPER(${f}) <> '${spec.state}'`;
+  const props = await queryRoll(spec, where, limit);
+  return props.filter((p) => {
+    const ms = (p.mailingState || "").toUpperCase().trim();
+    return (
+      /^[A-Z]{2}$/.test(ms) &&
+      ms !== spec.state &&
+      !!p.mailingAddress &&
+      !isGovernmentOwner(p.ownerName)
+    );
+  });
+}
+
+/**
+ * Probate/Estate: owner recorded as a deceased person's estate or heirs.
+ * Conservative — excludes company names ("REAL ESTATE", "…ESTATES LLC",
+ * subdivisions) that merely contain the word "estate", to avoid wrong-owner leads.
+ */
+const ESTATE_COMPANY_RE =
+  /\b(LLC|L L C|INC|CORP|COMPANY|CO|HOLDINGS?|DEVELOP|REAL ESTATE|ESTATES|PROPERT|PARTNERS?|LP|LLP|LTD|BANK|ASSOC|INVESTMENT|CAPITAL|GROUP|ENTERPRISE|MANAGEMENT|REALTY|FARMS)\b/i;
+const ESTATE_PERSON_RE = /(ESTATE OF|LIFE ESTATE|\bHEIRS?\b|\bEST\b|[A-Z]\s+ESTATE\b)/i;
+
+export async function scanEstateOwners(
+  county: string,
+  state: string,
+  limit = 200,
+): Promise<AssessorProperty[]> {
+  const spec = getRollSpec(county, state);
+  if (!spec) return [];
+  const f = spec.ownerField;
+  // Anchor at the DB: names ENDING in " ESTATE", or containing "ESTATE OF"/"HEIRS"/
+  // "LIFE ESTATE" — this excludes "…ESTATES LLC"/subdivisions before the fetch cap.
+  const where =
+    `UPPER(${f}) LIKE '% ESTATE' OR UPPER(${f}) LIKE '%ESTATE OF%' OR ` +
+    `UPPER(${f}) LIKE '%LIFE ESTATE%' OR UPPER(${f}) LIKE '%HEIRS%'`;
+  const props = await queryRoll(spec, where, Math.min(limit * 3, 600));
+  return props
+    .filter((p) => {
+      const n = (p.ownerName || "").toUpperCase();
+      if (!p.mailingAddress || isGovernmentOwner(n)) return false;
+      if (ESTATE_COMPANY_RE.test(n)) return false; // "REAL ESTATE"/"ESTATES LLC"/subdivisions
+      return ESTATE_PERSON_RE.test(n);
+    })
+    .slice(0, limit);
+}
+// NOTE: A duplicate, half-merged `skipTraceOwner` (Tracerfy) once lived here but
+// referenced symbols (`str`, `TRACERFY_DEFAULT_URL`, `SkipTraceOwner`) that are only
+// defined in services/skip-trace.service.ts — it was dead and would ReferenceError if
+// called. The real, complete skip-trace lives in services/skip-trace.service.ts.

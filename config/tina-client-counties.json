@@ -9,22 +9,22 @@
   {
     "name": "Clay",
     "state": "MO",
-    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"]
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"]
   },
   {
     "name": "Platte",
     "state": "MO",
-    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"]
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"]
   },
   {
     "name": "Cass",
     "state": "MO",
-    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"]
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"]
   },
   {
     "name": "Hamilton",
     "state": "OH",
-    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"]
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"]
   },
   {
     "name": "Jefferson",

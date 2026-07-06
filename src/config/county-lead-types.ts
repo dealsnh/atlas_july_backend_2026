@@ -9,13 +9,14 @@ export const FALLBACK_LEAD_TYPES = [
   "FSBO",
 ] as const;
 
-/** Tina client — 4 high-yield lead types per county to start (expand later). */
+/** Tina client — high-yield lead types per county. "Out-of-State Owner" is a
+ *  keyless, always-current roll-derived type for counties with an ArcGIS roll. */
 export const COUNTY_DEFAULT_LEAD_TYPES: Record<string, readonly string[]> = {
   "MO:Jackson": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"],
-  "MO:Clay": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"],
-  "MO:Platte": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"],
-  "MO:Cass": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"],
-  "OH:Hamilton": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"],
+  "MO:Clay": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"],
+  "MO:Platte": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"],
+  "MO:Cass": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"],
+  "OH:Hamilton": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"],
   "AL:Jefferson": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],
   "AL:Madison": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],
   "AL:Shelby": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],

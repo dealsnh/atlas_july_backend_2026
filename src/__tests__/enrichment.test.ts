@@ -34,50 +34,63 @@ describe("extractAddressFromListing", () => {
   });
 });
 
-describe("isLeadSaveable", () => {
-  it("requires identity + location; mailing optional", () => {
-    const complete = {
-      owner_name: "SMITH JOHN",
-      address: "123 Main St",
-      city: "Birmingham",
-      state: "AL",
-      mailing_address: null,
-    };
-    expect(isLeadSaveable(complete as never)).toBe(true);
-    expect(isLeadSaveable({ ...complete, mailing_address: "456 Oak Ave" } as never)).toBe(true);
+describe("isLeadSaveable (strict: owner + situs + mailing)", () => {
+  const base = {
+    owner_name: "SMITH JOHN",
+    address: "123 Main St",
+    city: "Birmingham",
+    state: "AL",
+  };
+
+  it("accepts owner + street situs + mailing", () => {
+    expect(isLeadSaveable({ ...base, mailing_address: "456 Oak Ave" } as never)).toBe(true);
+    expect(isLeadSaveable({ ...base, mailing_address: "123 Main St" } as never)).toBe(true);
   });
 
-  it("accepts case number + legal description", () => {
-    expect(
-      isLeadSaveable({
-        owner_name: null,
-        case_number: "22-PR-1234",
-        address: null,
-        description: "Clay County MO Probate — Estate of John Smith",
-      } as never),
-    ).toBe(true);
+  it("rejects when mailing address is missing", () => {
+    expect(isLeadSaveable({ ...base, mailing_address: null } as never)).toBe(false);
   });
 
-  it("accepts legal description as address", () => {
+  it("rejects a legal description as situs (not a real street line)", () => {
     expect(
       isLeadSaveable({
         owner_name: "Sandra Chadd",
         address: "Lot 4, Block 14, Carriage Hill subdivision",
-        description: "Clay County MO Sheriff Sale",
+        mailing_address: "Lot 4, Block 14",
       } as never),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it("rejects placeholder owners without case fallback", () => {
-    expect(isLeadSaveable({ owner_name: "FSBO Seller", address: "123 Main St" } as never)).toBe(
-      false,
-    );
+  it("rejects case-number-only identity (no owner name)", () => {
+    expect(
+      isLeadSaveable({
+        owner_name: null,
+        case_number: "22-PR-1234",
+        address: "123 Main St",
+        mailing_address: "123 Main St",
+      } as never),
+    ).toBe(false);
+  });
+
+  it("rejects placeholder owners", () => {
+    expect(
+      isLeadSaveable({
+        owner_name: "FSBO Seller",
+        address: "123 Main St",
+        mailing_address: "123 Main St",
+      } as never),
+    ).toBe(false);
   });
 
   it("rejects rows with neither identity nor location", () => {
-    expect(isLeadSaveable({ owner_name: null, address: null, description: null } as never)).toBe(
-      false,
-    );
+    expect(
+      isLeadSaveable({
+        owner_name: null,
+        address: null,
+        mailing_address: null,
+        description: null,
+      } as never),
+    ).toBe(false);
   });
 });
 

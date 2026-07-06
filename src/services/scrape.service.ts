@@ -20,6 +20,7 @@ import {
 } from "../repositories/scrape-runs.repository.js";
 import { getDateRange, runAllScrapers } from "../scrapers/index.js";
 import type { CountyConfig } from "../scrapers/base.js";
+import { isGovernmentOwner } from "../scrapers/assessor.js";
 import { logger } from "../utils/logger.js";
 import { enrichLeads, enrichmentStatus, isLeadSaveable } from "./enrichment.service.js";
 import { sendDailyReport } from "./email.service.js";
@@ -106,6 +107,16 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
           await finalizeRawLead(runId!, lead, {
             promoted: false,
             rejectReason: resolveRejectReason(lead),
+          });
+          continue;
+        }
+
+        // Government / municipal / utility owners are complete but not sellable.
+        if (isGovernmentOwner(lead.owner_name)) {
+          batchSkipped++;
+          await finalizeRawLead(runId!, lead, {
+            promoted: false,
+            rejectReason: RAW_REJECT_REASON.GOVERNMENT_OWNER,
           });
           continue;
         }

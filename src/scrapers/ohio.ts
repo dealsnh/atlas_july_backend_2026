@@ -23,7 +23,7 @@
 
 import * as XLSX from "xlsx";
 import { Lead, makeId, formatDate, fetchWithRetry, fetchRendered, fetchBlockedPage, settleScraperResults, courtCaseToLead, validateHtmlResponse } from "./base.js";
-import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
+import { lookupOwnerProperties, lookupByAddress, lookupByParcel } from "./assessor.js";
 
 // ─── Pre-Foreclosure via Hamilton County Clerk of Courts ──────────────────────
 async function scrapePreForeclosure(fromDate: string, toDate: string): Promise<Lead[]> {
@@ -215,21 +215,28 @@ async function scrapeTaxDelinquent(fromDate: string, toDate: string): Promise<Le
       });
     }
 
+    // Recover the TRUE situs (the XLSX only carries the owner's mailing address).
+    // Join by parcel id to the county roll; keep the XLSX mailing (authoritative
+    // tax-bill address) — only the property/situs is overwritten.
     const CONCURRENCY = 10;
-    const needsSitus = leads.filter((l) => l.owner_name).slice(0, 40);
+    const needsSitus = leads.filter((l) => l.owner_name).slice(0, 60);
     for (let i = 0; i < needsSitus.length; i += CONCURRENCY) {
       const batch = needsSitus.slice(i, i + CONCURRENCY);
       const results = await Promise.all(
         batch.map((l) =>
-          l.address
-            ? lookupByAddress(l.address, "Hamilton", "OH")
-            : lookupOwnerProperties(l.owner_name!, "Hamilton", "OH").then((p) => p[0] || null),
+          lookupByParcel("Hamilton", "OH", l.case_number).then(
+            (p) =>
+              p ||
+              (l.owner_name
+                ? lookupOwnerProperties(l.owner_name, "Hamilton", "OH").then((r) => r[0] || null)
+                : null),
+          ),
         ),
       );
       for (let j = 0; j < batch.length; j++) {
         const prop = results[j];
         if (!prop?.address) continue;
-        batch[j].address = prop.address;
+        batch[j].address = prop.address; // true situs (mailing left intact)
         if (prop.city) batch[j].city = prop.city;
         if (prop.zip) batch[j].zip = prop.zip;
       }
