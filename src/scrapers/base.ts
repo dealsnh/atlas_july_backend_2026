@@ -53,8 +53,12 @@ const SKIP_SCRAPER_PATTERNS = [
   "scraperapi.com", // Already proxied
   "api.scraperapi", // Already proxied
   "opendata.", // Open data APIs
-  "data.kcmo.org/resource/", // KCMO Socrata — no bot blocking, direct is fine
-  "data.cincinnati-oh.gov/", // Cincinnati open data — direct JSON
+  // NOTE: data.kcmo.org / data.cincinnati-oh.gov (Socrata) are NOT skipped — they
+  // work direct from a residential IP but return 0 from Railway's datacenter IP
+  // (Socrata throttles/blocks datacenter ranges), which silently killed Code
+  // Violation / Vacant / Pre-Foreclosure in prod. Routing them through ScraperAPI
+  // (rotating IPs) fixes it. The pre-encoded $where survives (ScraperAPI decodes the
+  // url param once → the target gets the correct single-encoded query).
   "16thcircuit.org/", // Jackson MO delinquent land tax — direct ASP pages
   "hcauditor.org", // Hamilton OH auditor XLSX + wedge property search
   "madisontc.com", // NOTE: this is Madison County FLORIDA — disabled as an AL source (see alabama.ts)
