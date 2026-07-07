@@ -4,27 +4,27 @@
     "state": "MO",
     "publicsearch_slug": "jackson",
     "publicsearch_state": "mo",
-    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"]
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner", "Absentee Owner", "Code Violation", "Vacant/Abandoned", "FSBO"]
   },
   {
     "name": "Clay",
     "state": "MO",
-    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"]
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner", "Absentee Owner", "FSBO"]
   },
   {
     "name": "Platte",
     "state": "MO",
-    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"]
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner", "Absentee Owner", "FSBO"]
   },
   {
     "name": "Cass",
     "state": "MO",
-    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"]
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner", "Absentee Owner", "FSBO"]
   },
   {
     "name": "Hamilton",
     "state": "OH",
-    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"]
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner", "Absentee Owner", "Long-Time Owner", "Senior Owner", "Code Violation", "Vacant/Abandoned", "FSBO"]
   },
   {
     "name": "Jefferson",
@@ -54,7 +54,7 @@
   {
     "name": "Montgomery",
     "state": "AL",
-    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"]
+    "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Out-of-State Owner", "Absentee Owner", "FSBO"]
   },
   {
     "name": "Autauga",

@@ -69,6 +69,8 @@ const SKIP_SCRAPER_PATTERNS = [
   "data.birminghamal.gov", // Jefferson vacant structures
   ".arcgis.com", // all Esri ArcGIS Online SaaS feature services — open APIs, fetch direct
   "arcgis/rest/services", // on-prem ArcGIS REST queries
+  "kcsgis.com", // Montgomery County AL Revenue self-hosted KCS GIS — direct JSON
+  "countygovservices.com", // Madison County AL AssuranceWeb — direct HTML/session
   "rss_outside", // PACER RSS — requires direct (no ScraperAPI)
   "ecf.oh", // PACER Ohio — direct RSS works
 ];

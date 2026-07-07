@@ -11,18 +11,23 @@ export const FALLBACK_LEAD_TYPES = [
 
 /** Tina client — high-yield lead types per county. "Out-of-State Owner" is a
  *  keyless, always-current roll-derived type for counties with an ArcGIS roll. */
+// Lead types are listed only where the county has a completer (parcel roll / E-Ring)
+// able to produce a full owner + situs + mailing lead. FSBO / Code Violation /
+// Vacant / Pre-Foreclosure require the completer's MAILING address, so they are
+// omitted for counties whose free roll exposes owner+situs but no mailing
+// (Jackson MO, Madison AL, Montgomery AL).
 export const COUNTY_DEFAULT_LEAD_TYPES: Record<string, readonly string[]> = {
-  "MO:Jackson": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure"],
-  "MO:Clay": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"],
-  "MO:Platte": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"],
-  "MO:Cass": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"],
-  "OH:Hamilton": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner"],
+  "MO:Jackson": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner", "Absentee Owner", "Code Violation", "Vacant/Abandoned", "FSBO"],
+  "MO:Clay": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner", "Absentee Owner", "FSBO"],
+  "MO:Platte": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner", "Absentee Owner", "FSBO"],
+  "MO:Cass": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner", "Absentee Owner", "FSBO"],
+  "OH:Hamilton": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner", "Absentee Owner", "Long-Time Owner", "Senior Owner", "Code Violation", "Vacant/Abandoned", "FSBO"],
   "AL:Jefferson": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],
   "AL:Madison": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],
   "AL:Shelby": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],
   "AL:Morgan": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],
   "AL:Limestone": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],
-  "AL:Montgomery": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],
+  "AL:Montgomery": ["Tax Delinquent", "Sheriff Sale", "Probate", "Out-of-State Owner", "Absentee Owner", "FSBO"],
   "AL:Autauga": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],
   "AL:Elmore": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"],
 };

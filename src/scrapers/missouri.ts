@@ -38,7 +38,8 @@ import {
   collectCraigslistSearchItems,
   fetchCraigslistListingDetails,
 } from "./craigslist.js";
-import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
+import { lookupOwnerProperties, lookupByAddress, isGovernmentOwner } from "./assessor.js";
+import { scrapeFsbo } from "./fsbo.js";
 
 const STATE = "MO";
 const OUTER_MO_COUNTIES = new Set(["clay", "platte", "cass"]);
@@ -1086,75 +1087,90 @@ async function scrapeCassCounty(fromDate: string, toDate: string): Promise<Lead[
 // ─── KC Code Violations via Kansas City Open Data ────────────────────────────
 // CONFIRMED WORKING: KC 311 Socrata API — dataset d4px-6rwg (311 Call Center Service Requests)
 // No auth required. Returns real-time code violations, fire/dangerous, water shutoffs.
-async function scrapeKCCodeViolations(fromDate: string, toDate: string): Promise<Lead[]> {
+// KCMO Socrata (city-limits = Jackson County) → complete against the Jackson roll,
+// which now returns owner + situs + MAILING (via address_compl). One row per parcel
+// (Socrata returns one per ordinance/case), deduped, then gated to owner+mailing.
+async function scrapeKcSocrataComplete(
+  datasetId: string,
+  where: string,
+  order: string,
+  leadType: string,
+  addrOf: (it: Record<string, string>) => string,
+  caseOf: (it: Record<string, string>) => string,
+  dateOf: (it: Record<string, string>) => string,
+  descOf: (it: Record<string, string>) => string,
+): Promise<Lead[]> {
   const leads: Lead[] = [];
   try {
-    // KC 311 Socrata d4px-6rwg — same dataset as Water Shutoff / Fire Damage
-    const types = [
-      "Dangerous Buildings",
-      "Health Code Violations",
-      "Property Violations",
-      "Contract and Labor Violations",
-    ];
-    const typeClause = types.map((t) => `issue_type='${t}'`).join(" OR ");
-    const where = `open_date_time>='${fromDate}T00:00:00' AND (${typeClause})`;
-    const url = `https://data.kcmo.org/resource/d4px-6rwg.json?$where=${encodeURIComponent(where)}&$limit=100&$order=${encodeURIComponent("open_date_time DESC")}`;
+    const url = `https://data.kcmo.org/resource/${datasetId}.json?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(order)}&$limit=1000`;
     const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
     if (!res.ok) return leads;
-
     const data = (await res.json()) as Record<string, string>[];
-    for (const item of data) {
-      const address = item.incident_address || item.address || "";
-      if (!address) continue;
-      const type = item.issue_type || item.issue_sub_type || "Code Violation";
-      const date = item.open_date_time?.slice(0, 10) || fromDate;
-      const caseNum = item.workorder_ || item.case_id || "";
 
-      leads.push({
-        id: makeId("Jackson", STATE, "Code Violation", caseNum || address),
-        county: "Jackson",
-        state: STATE,
-        lead_type: "Code Violation",
-        owner_name: null,
-        address: address || null,
-        city: "Kansas City",
-        zip: null,
-        mailing_address: null,
-        mailing_city: null,
-        mailing_state: null,
-        mailing_zip: null,
-        case_number: caseNum || null,
-        filing_date: formatDate(date),
-        assessed_value: null,
-        tax_year: null,
-        lender: null,
-        loan_amount: null,
-        sale_date: null,
-        sale_amount: null,
-        description: `Code Violation — ${type} — ${address}`,
-        source_url: "https://data.kcmo.org/311/311-Call-Center-Reported-Issues/d4px-6rwg",
-        raw_data: JSON.stringify(item),
-      });
+    const seen = new Set<string>();
+    const rows: Array<{ it: Record<string, string>; address: string }> = [];
+    for (const it of data) {
+      const address = (addrOf(it) || "").trim();
+      if (!/^\d+\s+\S/.test(address)) continue;
+      const key = it.pin || address.toUpperCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({ it, address });
     }
 
-    const CONCURRENCY_ADDR = 10;
-    const unenrichedAddr = leads.filter((l) => !l.owner_name && l.address).slice(0, 40);
-    for (let i = 0; i < unenrichedAddr.length; i += CONCURRENCY_ADDR) {
-      const batch = unenrichedAddr.slice(i, i + CONCURRENCY_ADDR);
-      const results = await Promise.all(
-        batch.map((l) => lookupByAddress(l.address!, l.county, STATE)),
-      );
+    const CONCURRENCY = 10;
+    const CAP = 200;
+    for (let i = 0; i < rows.length && i < CAP; i += CONCURRENCY) {
+      const batch = rows.slice(i, i + CONCURRENCY);
+      const props = await Promise.all(batch.map((r) => lookupByAddress(r.address, "Jackson", STATE)));
       for (let j = 0; j < batch.length; j++) {
-        const prop = results[j];
-        if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
-        if (prop?.address) batch[j].address = prop.address;
-        if (prop?.zip && !batch[j].zip) batch[j].zip = prop.zip;
+        const { it, address } = batch[j];
+        const prop = props[j];
+        if (!prop?.ownerName || !prop.mailingAddress || isGovernmentOwner(prop.ownerName)) continue;
+        leads.push({
+          id: makeId(leadType, "Jackson", STATE, caseOf(it) || address),
+          county: "Jackson",
+          state: STATE,
+          lead_type: leadType,
+          owner_name: prop.ownerName,
+          address: prop.address || address,
+          city: prop.city || "Kansas City",
+          zip: prop.zip || null,
+          mailing_address: prop.mailingAddress,
+          mailing_city: prop.mailingCity || null,
+          mailing_state: prop.mailingState || null,
+          mailing_zip: prop.mailingZip || null,
+          case_number: caseOf(it) || prop.parcelId || null,
+          filing_date: formatDate(dateOf(it)),
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
+          description: descOf(it),
+          source_url: `https://data.kcmo.org/resource/${datasetId}`,
+          raw_data: JSON.stringify({ pin: it.pin, case: caseOf(it), parcelId: prop.parcelId }),
+        });
       }
     }
   } catch (e) {
-    console.error("[MO] KC Code Violations error:", e);
+    console.error(`[MO] KC ${leadType} error:`, e);
   }
   return leads;
+}
+
+async function scrapeKCCodeViolations(fromDate: string, toDate: string): Promise<Lead[]> {
+  return scrapeKcSocrataComplete(
+    "vq3e-m9ge",
+    "vio_status in('In Violation','In Violation (Transferred to Courts)')",
+    "date_found DESC",
+    "Code Violation",
+    (it) => it.street_address || it.full_address || "",
+    (it) => it.casenumber || it.violationid || "",
+    (it) => it.date_found || fromDate,
+    (it) => `Code Violation — ${it.description || it.ord_text || it.ordinance || "open violation"} — ${it.street_address || ""}`,
+  );
 }
 
 // ─── KC Craigslist FSBO ───────────────────────────────────────────────────────
@@ -1676,67 +1692,17 @@ async function scrapeMOFireDamage(fromDate: string, toDate: string): Promise<Lea
 
 // ─── VACANT/ABANDONED — KC 311 Open Data ─────────────────────────────────────
 async function scrapeMOVacantAbandoned(fromDate: string, toDate: string): Promise<Lead[]> {
-  const leads: Lead[] = [];
-  try {
-    // KC 311 Socrata — CONFIRMED WORKING
-    // Dataset: d4px-6rwg (2021-present) | issue_type: 'Property Violations', issue_sub_type contains 'Vacant'
-    const url = `https://data.kcmo.org/resource/d4px-6rwg.json?$where=open_date_time>='${fromDate}T00:00:00' AND issue_type='Property Violations' AND issue_sub_type like '%Vacant%'&$limit=500&$order=open_date_time DESC`;
-    const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
-    if (!res.ok) return leads;
-    const data = (await res.json()) as Record<string, string>[];
-    for (const item of data) {
-      const address = item.incident_address || "";
-      if (!address) continue;
-      leads.push({
-        id: makeId("Jackson", STATE, "Vacant Abandoned", item.workorder_ || address),
-        county: "Jackson",
-        state: STATE,
-        lead_type: "Vacant/Abandoned",
-        owner_name: null,
-        address: address || null,
-        city: "Kansas City",
-        zip: null,
-        mailing_address: null,
-        mailing_city: null,
-        mailing_state: null,
-        mailing_zip: null,
-        case_number: item.workorder_ || null,
-        filing_date: formatDate(item.open_date_time?.slice(0, 10) || fromDate),
-        assessed_value: null,
-        tax_year: null,
-        lender: null,
-        loan_amount: null,
-        sale_date: null,
-        sale_amount: null,
-        description: `Vacant/Abandoned — ${item.issue_sub_type || "Vacant Property"} — ${address}`,
-        source_url: "https://data.kcmo.org/311/311-Call-Center-Reported-Issues/d4px-6rwg",
-        raw_data: JSON.stringify(item),
-      });
-    }
-
-    // Enrich with owner name via assessor address lookup — 10 concurrent
-    const CONCURRENCY_ADDR = 10;
-    const unenrichedAddr = leads.filter((l) => !l.owner_name && l.address);
-    for (let i = 0; i < unenrichedAddr.length; i += CONCURRENCY_ADDR) {
-      const batch = unenrichedAddr.slice(i, i + CONCURRENCY_ADDR);
-      const results = await Promise.all(
-        batch.map((l) => lookupByAddress(l.address!, l.county, STATE)),
-      );
-      for (let j = 0; j < batch.length; j++) {
-        const prop = results[j];
-        if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
-        if (prop?.zip && !batch[j].zip) batch[j].zip = prop.zip;
-        if (prop?.parcelId)
-          batch[j].raw_data = JSON.stringify({
-            ...JSON.parse(batch[j].raw_data || "{}"),
-            parcelId: prop.parcelId,
-          });
-      }
-    }
-  } catch (e) {
-    console.error(`[MO] Vacant/Abandoned error:`, e);
-  }
-  return leads;
+  // KCMO "Dangerous Buildings" (ax3m-jhxx), open cases → complete via Jackson roll.
+  return scrapeKcSocrataComplete(
+    "ax3m-jhxx",
+    "statusofcase='Ongoing Case'",
+    "case_opened DESC",
+    "Vacant/Abandoned",
+    (it) => it.address || "",
+    (it) => it.casenumber || "",
+    (it) => (it.case_opened || fromDate).slice(0, 10),
+    (it) => `Vacant/Abandoned — dangerous building (${it.statusofcase || "open"}) — ${it.address || ""}`,
+  );
 }
 
 // ─── BANKRUPTCY — Western District of MO (PACER RSS) ─────────────────────────
@@ -1875,7 +1841,7 @@ export async function scrapeCounty(
     Probate: () => scrapeJacksonProbate(fromDate, toDate),
     Bankruptcy: () => scrapeBankruptcy(fromDate, toDate),
     "Vacant/Abandoned": () => scrapeMOVacantAbandoned(fromDate, toDate),
-    FSBO: () => scrapeKCCraigslistFSBO(fromDate, toDate),
+    FSBO: () => scrapeFsbo(county, STATE, fromDate, toDate),
     Divorce: () => scrapeMODivorce(fromDate, toDate),
     Obituary: () => scrapeMOObituaries(fromDate, toDate),
   };
@@ -1885,7 +1851,7 @@ export async function scrapeCounty(
     "Pre-Foreclosure": () => scrapeLisPendens(fromDate, toDate),
     Probate: () => scrapeMOProbate(fromDate, toDate),
     Bankruptcy: () => scrapeBankruptcy(fromDate, toDate),
-    FSBO: () => scrapeKCCraigslistFSBO(fromDate, toDate),
+    FSBO: () => scrapeFsbo(county, STATE, fromDate, toDate),
   };
 
   const types = leadTypes?.length

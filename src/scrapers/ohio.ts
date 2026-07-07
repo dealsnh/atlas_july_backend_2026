@@ -23,7 +23,14 @@
 
 import * as XLSX from "xlsx";
 import { Lead, makeId, formatDate, fetchWithRetry, fetchRendered, fetchBlockedPage, settleScraperResults, courtCaseToLead, validateHtmlResponse } from "./base.js";
-import { lookupOwnerProperties, lookupByAddress, lookupByParcel } from "./assessor.js";
+import {
+  lookupOwnerProperties,
+  lookupByAddress,
+  lookupByParcel,
+  lookupByPoint,
+  isGovernmentOwner,
+} from "./assessor.js";
+import { scrapeFsbo } from "./fsbo.js";
 
 // ─── Pre-Foreclosure via Hamilton County Clerk of Courts ──────────────────────
 async function scrapePreForeclosure(fromDate: string, toDate: string): Promise<Lead[]> {
@@ -324,65 +331,72 @@ async function scrapeProbate(fromDate: string, toDate: string): Promise<Lead[]> 
 }
 
 // ─── Code Violations via Cincinnati Open Data ─────────────────────────────
+// Dataset cncm-znd6. Filter to distressed RESIDENTIAL cases (buildings/barricade/
+// demolition/property-maintenance) — the huge "trash/litter/tall grass" and
+// abandoned-vehicle buckets are low-signal noise and excluded. full_address feeds
+// the Hamilton parcel-roll completer for owner + mailing (required by the gate).
+const DISTRESS_CV_CLAUSE =
+  "(comp_type_desc like '%Buildings with Residences%' OR " +
+  "comp_type_desc like '%Barricading%' OR " +
+  "comp_type_desc like '%Demolition%' OR " +
+  "comp_type_desc like '%Property Maintenance%')";
+
 async function scrapeCodeViolationsHamilton(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
   try {
-    const where = `entered_date>='${fromDate}'`;
-    const url = `https://data.cincinnati-oh.gov/resource/cncm-znd6.json?$where=${encodeURIComponent(where)}&$limit=100&$order=${encodeURIComponent("entered_date DESC")}`;
-    const res = await fetchWithRetry(url, {
-      headers: { Accept: "application/json" },
-    });
+    const where = `entered_date>'${fromDate}' AND ${DISTRESS_CV_CLAUSE}`;
+    const url = `https://data.cincinnati-oh.gov/resource/cncm-znd6.json?$where=${encodeURIComponent(where)}&$limit=400&$order=${encodeURIComponent("entered_date DESC")}`;
+    const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
     if (!res.ok) return leads;
     const data = (await res.json()) as Record<string, string>[];
 
-    for (const item of data) {
-      const address = item.full_address || item.address || "";
-      const type =
-        item.comp_type_desc || item.sub_type_desc || item.violation_type || "Code Violation";
-      const date = item.entered_date || item.date_initiated || fromDate;
-      const caseNum = item.number_key || item.case_number || item.id || "";
-      if (!address && !caseNum) continue;
-
-      leads.push({
-        id: makeId("CV", caseNum || address, "Hamilton", "OH"),
-        county: "Hamilton",
-        state: "OH",
-        lead_type: "Code Violation",
-        owner_name: item.owner_name || item.property_owner || null,
-        address: address || null,
-        city: "Cincinnati",
-        zip: item.zip || null,
-        mailing_address: null,
-        mailing_city: null,
-        mailing_state: null,
-        mailing_zip: null,
-        case_number: caseNum || null,
-        filing_date: formatDate(date),
-        assessed_value: null,
-        tax_year: null,
-        lender: null,
-        loan_amount: null,
-        sale_date: null,
-        sale_amount: null,
-        description: `Code Violation — ${type} — ${address}`,
-        source_url:
-          "https://data.cincinnati-oh.gov/Neighborhoods/Cincinnati-Code-Enforcement/cncm-znd6",
-        raw_data: JSON.stringify(item),
-      });
-    }
+    const rows = data
+      .map((item) => ({ item, address: (item.full_address || "").trim() }))
+      .filter((r) => /^\d+\s+\S/.test(r.address));
 
     const CONCURRENCY = 10;
-    const batchTargets = leads.filter((l) => !l.owner_name?.trim() && l.address).slice(0, 40);
-    for (let i = 0; i < batchTargets.length; i += CONCURRENCY) {
-      const batch = batchTargets.slice(i, i + CONCURRENCY);
-      const results = await Promise.all(
-        batch.map((l) => lookupByAddress(l.address!, "Hamilton", "OH")),
+    const CAP = 200; // completer calls per run
+    for (let i = 0; i < rows.length && i < CAP; i += CONCURRENCY) {
+      const batch = rows.slice(i, i + CONCURRENCY);
+      const props = await Promise.all(
+        batch.map((r) => lookupByAddress(r.address, "Hamilton", "OH")),
       );
       for (let j = 0; j < batch.length; j++) {
-        const prop = results[j];
-        if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
-        if (prop?.address) batch[j].address = prop.address;
-        if (prop?.zip) batch[j].zip = prop.zip;
+        const { item, address } = batch[j];
+        const prop = props[j];
+        if (!prop?.ownerName || !prop.mailingAddress || isGovernmentOwner(prop.ownerName)) continue;
+        const type = item.comp_type_desc || item.sub_type_desc || "Code Violation";
+        leads.push({
+          id: makeId("CV", item.number_key || address, "Hamilton", "OH"),
+          county: "Hamilton",
+          state: "OH",
+          lead_type: "Code Violation",
+          owner_name: prop.ownerName,
+          address: prop.address || address,
+          city: prop.city || "Cincinnati",
+          zip: prop.zip || null,
+          mailing_address: prop.mailingAddress,
+          mailing_city: prop.mailingCity || null,
+          mailing_state: prop.mailingState || null,
+          mailing_zip: prop.mailingZip || null,
+          case_number: item.number_key || null,
+          filing_date: formatDate(item.entered_date),
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
+          description: `Code Violation — ${type} — ${prop.address || address}`,
+          source_url: "https://data.cincinnati-oh.gov/resource/cncm-znd6",
+          raw_data: JSON.stringify({
+            number_key: item.number_key,
+            comp_type_desc: item.comp_type_desc,
+            data_status_display: item.data_status_display,
+            entered_date: item.entered_date,
+            parcelId: prop.parcelId,
+          }),
+        });
       }
     }
   } catch (e) {
@@ -861,97 +875,96 @@ export async function scrapeDivorce(fromDate: string, toDate: string): Promise<L
   }
   return leads;
 }
-// ─── VACANT/ABANDONED — Cincinnati Open Data Vacant Foreclosed Property Registry ─
-// Dataset: w3jp-dfxy (Vacant Foreclosed Property Program)
-// Fields: number_key, comp_type_desc, sub_type_desc, entered_date, latitude, longitude, neighborhood
-// NOTE: No street address field — use Nominatim reverse geocoding from lat/lon
-// Enrichment: lookupByAddress → owner name from Hamilton County Auditor
-export async function scrapeVacantAbandoned(fromDate: string, toDate: string): Promise<Lead[]> {
+// ─── VACANT/ABANDONED + PRE-FORECLOSURE — Cincinnati Vacant/Foreclosed Registry ─
+// Dataset w3jp-dfxy carries latitude/longitude but NO street field, so we resolve
+// owner + situs + mailing directly with a SPATIAL parcel-roll query (lookupByPoint) —
+// far more reliable than Nominatim reverse-geocoding. Two filters, two lead types:
+//   work_type='VACANT FORECLOSED PROPTY PROGRAM'   → Vacant/Abandoned
+//   data_status_display like '%Foreclosure Filed%' → Pre-Foreclosure
+async function scrapeRegistryByPoint(
+  where: string,
+  leadType: string,
+  note: string,
+): Promise<Lead[]> {
   const leads: Lead[] = [];
   try {
-    const url = `https://data.cincinnati-oh.gov/resource/w3jp-dfxy.json?$where=entered_date>='${fromDate}T00:00:00'&$limit=300&$order=entered_date DESC`;
+    const url = `https://data.cincinnati-oh.gov/resource/w3jp-dfxy.json?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent("entered_date DESC")}&$limit=400`;
     const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
-    if (res.ok) {
-      const data = (await res.json()) as Record<string, string>[];
-      // Reverse geocode lat/lon to get street address (Nominatim, rate-limited)
-      for (const item of data) {
-        const lat = item.latitude || "";
-        const lon = item.longitude || "";
-        let address = "";
-        let zip = "";
-        if (lat && lon) {
-          try {
-            const geoRes = await fetchWithRetry(
-              `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
-              { headers: { "User-Agent": "AtlasLeadSystem/1.0" } },
-            );
-            if (geoRes.ok) {
-              const geo = (await geoRes.json()) as Record<string, any>;
-              const addrObj = geo.address || {};
-              const house = addrObj.house_number || "";
-              const road = addrObj.road || "";
-              address = house && road ? `${house} ${road}` : road;
-              zip = addrObj.postcode || "";
-            }
-          } catch {
-            /* skip geocoding if it fails */
-          }
-          // Nominatim rate limit: 1 req/sec
-          await new Promise((r) => setTimeout(r, 1100));
-        }
-        if (!address) address = `[lat:${lat.slice(0, 7)}, lon:${lon.slice(0, 8)}]`;
+    if (!res.ok) return leads;
+    const data = (await res.json()) as Record<string, string>[];
+    const rows = data.filter((it) => it.latitude && it.longitude);
+
+    const CONCURRENCY = 8;
+    const CAP = 200;
+    for (let i = 0; i < rows.length && i < CAP; i += CONCURRENCY) {
+      const batch = rows.slice(i, i + CONCURRENCY);
+      const props = await Promise.all(
+        batch.map((it) => lookupByPoint(it.longitude, it.latitude, "Hamilton", "OH")),
+      );
+      for (let j = 0; j < batch.length; j++) {
+        const it = batch[j];
+        const prop = props[j];
+        if (!prop?.ownerName || !prop.mailingAddress || isGovernmentOwner(prop.ownerName)) continue;
         leads.push({
-          id: makeId("Hamilton", "OH", "Vacant Abandoned", item.number_key || address),
+          id: makeId(
+            leadType,
+            it.uniqueid || it.number_key || `${it.latitude},${it.longitude}`,
+            "Hamilton",
+            "OH",
+          ),
           county: "Hamilton",
           state: "OH",
-          lead_type: "Vacant/Abandoned",
-          owner_name: null,
-          address: address || null,
-          city: "Cincinnati",
-          zip: zip || null,
-          mailing_address: null,
-          mailing_city: null,
-          mailing_state: null,
-          mailing_zip: null,
-          case_number: item.number_key || null,
-          filing_date: formatDate(item.entered_date?.slice(0, 10) || fromDate),
+          lead_type: leadType,
+          owner_name: prop.ownerName,
+          address: prop.address,
+          city: prop.city || "Cincinnati",
+          zip: prop.zip || null,
+          mailing_address: prop.mailingAddress,
+          mailing_city: prop.mailingCity || null,
+          mailing_state: prop.mailingState || null,
+          mailing_zip: prop.mailingZip || null,
+          case_number: prop.parcelId || it.number_key || null,
+          filing_date: formatDate(it.entered_date?.slice(0, 10)),
           assessed_value: null,
           tax_year: null,
           lender: null,
           loan_amount: null,
           sale_date: null,
           sale_amount: null,
-          description: `Vacant/Abandoned — ${item.comp_type_desc || ""} — ${item.sub_type_desc || ""} — ${item.neighborhood || ""}`,
+          description: `${leadType} — ${note} — ${prop.address}${it.neighborhood ? ` — ${it.neighborhood}` : ""}`,
           source_url: "https://data.cincinnati-oh.gov/resource/w3jp-dfxy",
-          raw_data: JSON.stringify(item),
+          raw_data: JSON.stringify({
+            number_key: it.number_key,
+            data_status_display: it.data_status_display,
+            work_type: it.work_type,
+            parcelId: prop.parcelId,
+          }),
         });
       }
     }
-    // Enrich with owner name via assessor address lookup — 5 concurrent
-    const CONCURRENCY_V = 5;
-    const unenriched = leads.filter(
-      (l) => !l.owner_name && l.address && !l.address.startsWith("["),
-    );
-    for (let i = 0; i < unenriched.length; i += CONCURRENCY_V) {
-      const batch = unenriched.slice(i, i + CONCURRENCY_V);
-      const results = await Promise.all(
-        batch.map((l) => lookupByAddress(l.address!, "Hamilton", "OH")),
-      );
-      for (let j = 0; j < batch.length; j++) {
-        const prop = results[j];
-        if (prop?.ownerName) batch[j].owner_name = prop.ownerName;
-        if (prop?.zip && !batch[j].zip) batch[j].zip = prop.zip;
-        if (prop?.parcelId)
-          batch[j].raw_data = JSON.stringify({
-            ...JSON.parse(batch[j].raw_data || "{}"),
-            parcelId: prop.parcelId,
-          });
-      }
-    }
   } catch (e) {
-    console.error("[Hamilton OH] Vacant/Abandoned error:", e);
+    console.error(`[Hamilton OH] ${leadType} error:`, e);
   }
   return leads;
+}
+
+export async function scrapeVacantAbandoned(fromDate: string, toDate: string): Promise<Lead[]> {
+  return scrapeRegistryByPoint(
+    "work_type='VACANT FORECLOSED PROPTY PROGRAM'",
+    "Vacant/Abandoned",
+    "vacant/foreclosed registry",
+  );
+}
+
+export async function scrapePreForeclosureRegistry(
+  fromDate: string,
+  toDate: string,
+): Promise<Lead[]> {
+  return scrapeRegistryByPoint(
+    "data_status_display like '%Foreclosure Filed%'",
+    "Pre-Foreclosure",
+    "foreclosure filed",
+  );
 }
 export async function scrapeOutOfStateOwners(fromDate: string, toDate: string): Promise<Lead[]> {
   return []; // out-of-state owners excluded per Atlas config
@@ -971,11 +984,19 @@ export async function scrapeOhio(
   }
 
   const runners: Record<string, () => Promise<Lead[]>> = {
-    "Pre-Foreclosure": () => scrapePreForeclosure(fromDate, toDate),
+    "Pre-Foreclosure": async () => {
+      // Primary: Cincinnati foreclosure-filed registry (keyless, completes via spatial roll).
+      // Secondary: courtclerk.org (Cloudflare-walled — best-effort, may return 0).
+      const [registry, court] = await Promise.all([
+        scrapePreForeclosureRegistry(fromDate, toDate),
+        scrapePreForeclosure(fromDate, toDate).catch(() => [] as Lead[]),
+      ]);
+      return [...registry, ...court];
+    },
     "Sheriff Sale": () => scrapeSheriffSales(fromDate, toDate),
     "Tax Delinquent": () => scrapeTaxDelinquent(fromDate, toDate),
     Probate: () => scrapeProbate(fromDate, toDate),
-    FSBO: () => scrapeFSBO(fromDate, toDate),
+    FSBO: () => scrapeFsbo("Hamilton", "OH", fromDate, toDate),
     "Fire Damage": () => scrapeFireDamage(fromDate, toDate),
     Bankruptcy: () => scrapeBankruptcy(fromDate, toDate),
     "Code Violation": () => scrapeCodeViolationsHamilton(fromDate, toDate),

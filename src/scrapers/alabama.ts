@@ -20,6 +20,7 @@ import {
   toUsDate,
 } from "./base.js";
 import { lookupOwnerProperties, lookupByAddress } from "./assessor.js";
+import { scrapeFsbo } from "./fsbo.js";
 import {
   collectCraigslistSearchItems,
   fetchCraigslistListingDetails,
@@ -717,6 +718,14 @@ async function scrapeSheriffSales(
       if (prop?.address) batch[j].address = prop.address;
       if (prop?.city) batch[j].city = prop.city || batch[j].city;
       if (prop?.zip) batch[j].zip = prop.zip;
+      // Attach owner mailing directly so the lead is complete at the source
+      // (the E-Ring situs match already carries it).
+      if (prop?.mailingAddress) {
+        batch[j].mailing_address = prop.mailingAddress;
+        batch[j].mailing_city = prop.mailingCity || null;
+        batch[j].mailing_state = prop.mailingState || null;
+        batch[j].mailing_zip = prop.mailingZip || null;
+      }
     }
   }
 
@@ -1318,7 +1327,7 @@ export async function scrapeAlabama(
     "Pre-Foreclosure": () => scrapePreForeclosure(county, fromDate, toDate),
     "Tax Delinquent": () => scrapeTaxDelinquent(county, fromDate, toDate),
     "Sheriff Sale": () => scrapeSheriffSales(county, fromDate, toDate),
-    FSBO: () => scrapeFSBO(county, fromDate, toDate),
+    FSBO: () => scrapeFsbo(county, "AL", fromDate, toDate),
     Obituary: () => scrapeObituaries(county, fromDate, toDate),
     Probate: () => scrapeProbate(county, fromDate, toDate),
   };

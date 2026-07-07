@@ -13,6 +13,7 @@
 
 import { spawnSync } from "child_process";
 import { fetchWithRetry, fetchRendered } from "./base.js";
+import { madisonLookupByAddress, madisonLookupByOwner } from "./madison-al.js";
 
 export interface AssessorProperty {
   address: string;
@@ -180,6 +181,28 @@ const ROLL_SPECS: Record<string, RollSpec> = {
     parcelIdField: "PARCELID",
     defaultCity: "Cincinnati",
     state: "OH",
+  },
+  // Montgomery County AL — county Revenue's self-hosted KCS GIS (owner+situs+mailing,
+  // 105k parcels). Host is kcsgis.com (NOT arcgis.com) — base.ts bypasses it for direct
+  // fetch. Values are space-padded fixed-width; s()/trim handles it.
+  "montgomery-al": {
+    urls: [
+      env(
+        "MONTGOMERY_AL_PARCEL_QUERY_URL",
+        "https://al03montrevenue.kcsgis.com/kcsgis/rest/services/Montgomery/AL03_Public_ISV/MapServer/29/query",
+      ),
+    ],
+    ownerField: "OwnerName",
+    situsDisplayField: "PropertyAddr1",
+    situsCityField: "PropertyCity",
+    situsZipField: "PropertyZip",
+    mailFields: ["MailAddress1", "MailAddress2"],
+    mailCityField: "MailCity",
+    mailStateField: "MailState",
+    mailZipField: "MailZip",
+    parcelIdField: "ParcelNo",
+    defaultCity: "Montgomery",
+    state: "AL",
   },
 };
 
@@ -475,16 +498,51 @@ function eRingLookupByOwner(tenant: ERingTenant, ownerName: string): AssessorPro
   return queryERing(tenant, q, 1, 5);
 }
 
+const STREET_SUFFIX: Record<string, string> = {
+  AVENUE: "AVE",
+  STREET: "ST",
+  ROAD: "RD",
+  DRIVE: "DR",
+  PLACE: "PL",
+  LANE: "LN",
+  COURT: "CT",
+  BOULEVARD: "BLVD",
+  TERRACE: "TER",
+  CIRCLE: "CIR",
+  PARKWAY: "PKWY",
+  HIGHWAY: "HWY",
+  TRAIL: "TRL",
+  ROUTE: "RT",
+};
+
+/** Normalized street tokens (suffix-canonicalized) for precise address matching. */
+function streetTokens(addr: string): string[] {
+  return addr
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((t) => STREET_SUFFIX[t] || t);
+}
+
 function eRingLookupByAddress(
   tenant: ERingTenant,
   streetNum: string,
   streetRest: string,
 ): AssessorProperty | null {
-  const firstTok = streetRest.trim().split(/\s+/).filter(Boolean)[0] || "";
+  const rest = streetRest.trim();
+  const firstTok = rest.split(/\s+/).filter(Boolean)[0] || "";
   if (!streetNum || !firstTok) return null;
-  const results = queryERing(tenant, `${streetNum} ${firstTok}`, 4, 8);
+  const results = queryERing(tenant, `${streetNum} ${firstTok}`, 4, 25);
+  const want = streetTokens(`${streetNum} ${rest}`);
+  // Require the house number AND every (suffix-normalized) street token to be
+  // present — Birmingham's lettered grid means "2608 AVENUE T" must NOT match
+  // "2608 AVENUE B"; the old house-number+first-token check silently did.
   return (
-    results.find((r) => r.address.toUpperCase().startsWith(`${streetNum} `)) || null
+    results.find((r) => {
+      const got = new Set(streetTokens(r.address));
+      return got.has(streetNum) && want.every((t) => got.has(t));
+    }) || null
   );
 }
 
@@ -526,12 +584,58 @@ function buildAddressLikePatterns(address: string): string[] {
   return [...patterns];
 }
 
+const MAIL_STREET_SUFFIX = new Set([
+  "ST", "AVE", "AVENUE", "BLVD", "RD", "DR", "DRIVE", "LN", "LANE", "CT", "COURT",
+  "PL", "PLACE", "TER", "TERRACE", "TRFY", "TFWY", "PKWY", "PARKWAY", "HWY", "HIGHWAY",
+  "CIR", "CIRCLE", "WAY", "TRL", "TRAIL", "BOX", "LOOP", "PLAZA", "SQ", "ROW", "RUN",
+  "PT", "PATH", "PIKE", "BEND", "PASS", "XING", "COVE", "STE", "APT", "UNIT",
+]);
+
+/**
+ * Parse a combined single-string mailing address ("STREET [UNIT] CITY, ST ZIP")
+ * into street / city / state / zip. Used for Jackson County MO, whose roll stores
+ * the owner mailing address as one field (`address_compl`).
+ */
+function parseCombinedMailing(raw: unknown): {
+  mailingAddress?: string;
+  mailingCity?: string;
+  mailingState?: string;
+  mailingZip?: string;
+} {
+  const str = s(raw);
+  if (!str || str.length < 5) return {};
+  const m = str.match(/^(.*?)[,\s]+([A-Z]{2})\.?\s+(\d{5})(?:-\d{4})?\s*$/i);
+  if (!m) return { mailingAddress: str };
+  const state = m[2].toUpperCase();
+  const zip = m[3];
+  const left = m[1].replace(/,\s*$/, "").trim();
+  const toks = left.split(/\s+/).filter(Boolean);
+  let cut = -1;
+  for (let i = toks.length - 1; i >= 0; i--) {
+    const t = toks[i].replace(/[^A-Z0-9#]/gi, "").toUpperCase();
+    if (/^\d+$/.test(t) || /^\d+[A-Z]$/.test(t) || MAIL_STREET_SUFFIX.has(t) || toks[i].startsWith("#")) {
+      cut = i;
+      break;
+    }
+  }
+  if (cut >= 0 && cut < toks.length - 1) {
+    return {
+      mailingAddress: toks.slice(0, cut + 1).join(" "),
+      mailingCity: toks.slice(cut + 1).join(" "),
+      mailingState: state,
+      mailingZip: zip,
+    };
+  }
+  return { mailingAddress: left, mailingState: state, mailingZip: zip };
+}
+
 function mapJacksonMarketFeature(attrs: Record<string, string>): AssessorProperty | null {
   const address = attrs.situs_address?.trim();
-  const ownerParts = (attrs.owner_info || "").split("|").map((s) => s.trim());
-  const ownerName = ownerParts[0];
-  const mailCandidate = ownerParts.find((p, i) => i > 0 && /^\d+\s+[A-Za-z]/.test(p));
+  const ownerName = (attrs.owner_info || "").split("|")[0]?.trim();
   if (!address || !ownerName) return null;
+  // `address_compl` is the owner MAILING address (equals situs for owner-occupants;
+  // an out-of-town/out-of-state address for absentees) — the county's only mailing field.
+  const mail = parseCombinedMailing(attrs.address_compl);
   return {
     address,
     city: attrs.situs_city?.trim() || "Kansas City",
@@ -539,14 +643,20 @@ function mapJacksonMarketFeature(attrs: Record<string, string>): AssessorPropert
     zip: attrs.situs_zip?.trim() || undefined,
     parcelId: attrs.parcel_number?.trim() || undefined,
     ownerName,
-    mailingAddress: mailCandidate || undefined,
+    mailingAddress: mail.mailingAddress,
+    mailingCity: mail.mailingCity,
+    mailingState: mail.mailingState || "MO",
+    mailingZip: mail.mailingZip,
   };
 }
 
 async function queryJacksonMarketValue(where: string, limit = 5): Promise<AssessorProperty[]> {
   const qUrl = new URL(JACKSON_MARKET_VALUE_URL);
   qUrl.searchParams.set("where", where);
-  qUrl.searchParams.set("outFields", "parcel_number,situs_address,situs_city,situs_zip,owner_info");
+  qUrl.searchParams.set(
+    "outFields",
+    "parcel_number,situs_address,situs_city,situs_zip,owner_info,address_compl",
+  );
   qUrl.searchParams.set("returnGeometry", "false");
   qUrl.searchParams.set("f", "json");
   qUrl.searchParams.set("resultRecordCount", String(limit));
@@ -1360,43 +1470,10 @@ export async function lookupByAddress(
           }
         }
       } else if (countyKey === "madison") {
-        const qUrl = new URL(
-          "https://services.arcgis.com/V6ZHFr6zdgNZuVG0/ArcGIS/rest/services/Madison_County_Parcels/FeatureServer/0/query",
-        );
-        qUrl.searchParams.set("where", `UPPER(SITUS_ADDR) LIKE '${streetNum} ${streetName}%'`);
-        qUrl.searchParams.set(
-          "outFields",
-          "PARCELID,OWNER_NAME,SITUS_ADDR,SITUS_CITY,SITUS_ZIP,MAIL_ADDR,MAIL_CITY,MAIL_STATE,MAIL_ZIP",
-        );
-        qUrl.searchParams.set("returnGeometry", "false");
-        qUrl.searchParams.set("f", "json");
-        qUrl.searchParams.set("resultRecordCount", "1");
-        const res = await fetchWithRetry(qUrl.toString(), {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-          },
-        });
-        if (res.ok) {
-          const data = (await res.json()) as {
-            features?: { attributes: Record<string, string> }[];
-          };
-          const f = data.features?.[0]?.attributes;
-          if (f && f.SITUS_ADDR) {
-            return {
-              address: f.SITUS_ADDR,
-              city: f.SITUS_CITY || "Huntsville",
-              state: "AL",
-              zip: f.SITUS_ZIP || undefined,
-              parcelId: f.PARCELID || undefined,
-              ownerName: f.OWNER_NAME || undefined,
-              mailingAddress: f.MAIL_ADDR?.trim() || undefined,
-              mailingCity: f.MAIL_CITY?.trim() || undefined,
-              mailingState: f.MAIL_STATE?.trim() || "AL",
-              mailingZip: f.MAIL_ZIP?.trim() || undefined,
-            };
-          }
-        }
+        // Madison AL AssuranceWeb portal (owner + situs + mailing). The old
+        // V6ZHFr6zdgNZuVG0 ArcGIS endpoint was fake/wrong-county — replaced.
+        const m = await madisonLookupByAddress(streetNum, parts.slice(1).join(" ") || streetName);
+        if (m) return m;
       }
     }
   } catch {
@@ -1442,6 +1519,16 @@ export async function lookupOwnerProperties(
       if (r.length) return r.filter((x) => x.address && /\d+\s+[A-Za-z]/.test(x.address));
     } catch {
       /* fall through to bespoke lookup */
+    }
+  }
+
+  // Madison AL AssuranceWeb portal (owner + situs + mailing).
+  if (specKey === "madison-al") {
+    try {
+      const r = await madisonLookupByOwner(ownerName);
+      if (r.length) return r.filter((x) => x.address && /\d+\s+[A-Za-z]/.test(x.address));
+    } catch {
+      /* fall through */
     }
   }
 
@@ -1498,6 +1585,46 @@ export function rollSupportsCounty(county: string, state: string): boolean {
   return !!getRollSpec(county, state);
 }
 
+/**
+ * lat/long point → property (owner + situs + mailing) via a spatial parcel query.
+ * For coordinate-only sources (e.g. Cincinnati open-data foreclosure / vacant
+ * registries that carry latitude/longitude but no street field). Verified live:
+ * a point inside a Hamilton parcel returns OWNNM1 + situs + owner mailing.
+ */
+export async function lookupByPoint(
+  lon: number | string,
+  lat: number | string,
+  county: string,
+  state: string,
+): Promise<AssessorProperty | null> {
+  const spec = getRollSpec(county, state);
+  if (!spec) return null;
+  const lonN = Number(lon);
+  const latN = Number(lat);
+  if (!isFinite(lonN) || !isFinite(latN) || (lonN === 0 && latN === 0)) return null;
+  for (const base of spec.urls) {
+    try {
+      const qUrl = new URL(base);
+      qUrl.searchParams.set("geometry", `${lonN},${latN}`);
+      qUrl.searchParams.set("geometryType", "esriGeometryPoint");
+      qUrl.searchParams.set("inSR", "4326");
+      qUrl.searchParams.set("spatialRel", "esriSpatialRelIntersects");
+      qUrl.searchParams.set("outFields", rollOutFields(spec));
+      qUrl.searchParams.set("returnGeometry", "false");
+      qUrl.searchParams.set("resultRecordCount", "1");
+      qUrl.searchParams.set("f", "json");
+      const res = await fetchWithRetry(qUrl.toString());
+      if (!res.ok) continue;
+      const data = (await res.json()) as { features?: { attributes: Record<string, unknown> }[] };
+      const mapped = data.features?.[0] && mapRollFeature(data.features[0].attributes, spec);
+      if (mapped) return mapped;
+    } catch {
+      /* try next endpoint */
+    }
+  }
+  return null;
+}
+
 /** Out-of-State Owner: mailing state ≠ property state (a strong absentee-seller signal). */
 export async function scanOutOfStateOwners(
   county: string,
@@ -1507,7 +1634,9 @@ export async function scanOutOfStateOwners(
   const spec = getRollSpec(county, state);
   if (!spec?.mailStateField) return [];
   const f = spec.mailStateField;
-  const where = `${f} IS NOT NULL AND ${f} <> '' AND ${f} <> ' ' AND UPPER(${f}) <> '${spec.state}'`;
+  // NOT LIKE 'STATE%' (not <> 'STATE') so space-padded fixed-width values (e.g. "AL  ")
+  // are still recognized as in-state and excluded.
+  const where = `${f} IS NOT NULL AND ${f} <> '' AND ${f} <> ' ' AND UPPER(${f}) NOT LIKE '${spec.state}%'`;
   const props = await queryRoll(spec, where, limit);
   return props.filter((p) => {
     const ms = (p.mailingState || "").toUpperCase().trim();
@@ -1518,6 +1647,50 @@ export async function scanOutOfStateOwners(
       !isGovernmentOwner(p.ownerName)
     );
   });
+}
+
+/**
+ * Absentee Owner: the owner's mailing address differs from the property's situs
+ * address (they don't live there) but is still IN-state — the in-state complement
+ * to Out-of-State Owner, so the two lists don't overlap. Pure roll-derived, already
+ * complete (owner + situs + mailing). Conservative: a row counts as owner-occupied
+ * (excluded) only when the mailing clearly contains the situs house# AND street.
+ */
+export async function scanAbsenteeOwners(
+  county: string,
+  state: string,
+  limit = 200,
+): Promise<AssessorProperty[]> {
+  const spec = getRollSpec(county, state);
+  if (!spec) return [];
+  // Prefer in-state rows so this doesn't duplicate the Out-of-State list.
+  const f = spec.mailStateField;
+  // LIKE 'STATE%' so space-padded in-state values (e.g. "AL  ") still match.
+  const where = f
+    ? `${f} IS NULL OR ${f} = '' OR UPPER(${f}) LIKE '${spec.state}%'`
+    : "1=1";
+  const props = await queryRoll(spec, where, Math.min(limit * 8, 2500));
+  const out: AssessorProperty[] = [];
+  const seen = new Set<string>();
+  for (const p of props) {
+    if (!p.address || !p.mailingAddress || isGovernmentOwner(p.ownerName)) continue;
+    const ms = (p.mailingState || "").toUpperCase().trim();
+    if (ms && ms !== spec.state) continue; // out-of-state handled elsewhere
+    const situsToks = streetTokens(p.address);
+    const mailToks = new Set(streetTokens(p.mailingAddress));
+    const situsNum = situsToks[0];
+    const situsStreet = situsToks.find((t) => !/^\d+$/.test(t) && !STREET_DIRECTIONALS.has(t));
+    // Owner-occupied when the mailing carries the same house number AND street name.
+    const occupied = !!situsNum && mailToks.has(situsNum) && !!situsStreet && mailToks.has(situsStreet);
+    if (occupied) continue;
+    if (!/^\d/.test(p.mailingAddress.trim()) && !/P\.?\s?O\.?\s?BOX/i.test(p.mailingAddress)) continue;
+    const key = p.parcelId || `${p.ownerName}|${p.address}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 /**
@@ -1548,6 +1721,79 @@ export async function scanEstateOwners(
       const n = (p.ownerName || "").toUpperCase();
       if (!p.mailingAddress || isGovernmentOwner(n)) return false;
       if (ESTATE_COMPANY_RE.test(n)) return false; // "REAL ESTATE"/"ESTATES LLC"/subdivisions
+      return ESTATE_PERSON_RE.test(n);
+    })
+    .slice(0, limit);
+}
+
+/**
+ * Generic roll scan by an arbitrary WHERE clause — returns complete (owner+situs+
+ * mailing) rows, government owners dropped. Used for county-specific roll-derived
+ * types whose signal is a native field (e.g. Hamilton OH `DELQ_TAXES` tax-delinquent,
+ * `HMSD_FLAG` senior/homestead, `SALDAT` long-time owner). Only fields present on the
+ * layer are needed in the WHERE — outFields stay owner+situs+mailing.
+ */
+export async function scanRollByWhere(
+  county: string,
+  state: string,
+  where: string,
+  limit = 250,
+): Promise<AssessorProperty[]> {
+  const spec = getRollSpec(county, state);
+  if (!spec) return [];
+  const props = await queryRoll(spec, where, Math.min(limit * 2, 1500));
+  return props
+    .filter((p) => p.address && p.mailingAddress && !isGovernmentOwner(p.ownerName))
+    .slice(0, limit);
+}
+
+// ─── Jackson County MO roll-derived scans ────────────────────────────────────
+// Jackson isn't a generic ROLL_SPEC (owner_info is pipe-delimited, mailing is the
+// single combined `address_compl`), so it gets bespoke scans over Parcels_Market_Value.
+export async function scanJacksonOutOfState(limit = 250): Promise<AssessorProperty[]> {
+  const where =
+    "situs_address IS NOT NULL AND address_compl IS NOT NULL AND address_compl NOT LIKE '%, MO%'";
+  const props = await queryJacksonMarketValue(where, limit);
+  return props.filter((p) => {
+    const ms = (p.mailingState || "").toUpperCase().trim();
+    return /^[A-Z]{2}$/.test(ms) && ms !== "MO" && !!p.mailingAddress && !isGovernmentOwner(p.ownerName);
+  });
+}
+
+export async function scanJacksonAbsentee(limit = 250): Promise<AssessorProperty[]> {
+  const where =
+    "situs_address IS NOT NULL AND address_compl IS NOT NULL AND address_compl LIKE '%, MO%'";
+  const props = await queryJacksonMarketValue(where, Math.min(limit * 6, 2000));
+  const out: AssessorProperty[] = [];
+  const seen = new Set<string>();
+  for (const p of props) {
+    if (!p.address || !p.mailingAddress || isGovernmentOwner(p.ownerName)) continue;
+    if ((p.mailingState || "").toUpperCase().trim() !== "MO") continue;
+    const situsToks = streetTokens(p.address);
+    const mailToks = new Set(streetTokens(p.mailingAddress));
+    const situsNum = situsToks[0];
+    const situsStreet = situsToks.find((t) => !/^\d+$/.test(t) && !STREET_DIRECTIONALS.has(t));
+    const occupied = !!situsNum && mailToks.has(situsNum) && !!situsStreet && mailToks.has(situsStreet);
+    if (occupied) continue;
+    const key = p.parcelId || `${p.ownerName}|${p.address}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export async function scanJacksonEstate(limit = 200): Promise<AssessorProperty[]> {
+  const where =
+    "situs_address IS NOT NULL AND (UPPER(owner_info) LIKE '% ESTATE' OR " +
+    "UPPER(owner_info) LIKE '%ESTATE OF%' OR UPPER(owner_info) LIKE '%LIFE ESTATE%' OR " +
+    "UPPER(owner_info) LIKE '%HEIRS%')";
+  const props = await queryJacksonMarketValue(where, Math.min(limit * 3, 600));
+  return props
+    .filter((p) => {
+      const n = (p.ownerName || "").toUpperCase();
+      if (!p.mailingAddress || isGovernmentOwner(n) || ESTATE_COMPANY_RE.test(n)) return false;
       return ESTATE_PERSON_RE.test(n);
     })
     .slice(0, limit);
