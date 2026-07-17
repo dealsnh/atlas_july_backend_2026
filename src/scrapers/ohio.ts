@@ -31,6 +31,7 @@ import {
   isGovernmentOwner,
 } from "./assessor.js";
 import { scrapeFsbo } from "./fsbo.js";
+import { logger } from "../utils/logger.js";
 
 // ─── Pre-Foreclosure via Hamilton County Clerk of Courts ──────────────────────
 async function scrapePreForeclosure(fromDate: string, toDate: string): Promise<Lead[]> {
@@ -100,13 +101,13 @@ async function scrapePreForeclosure(fromDate: string, toDate: string): Promise<L
 // ─── Sheriff Sales via Hamilton County RealAuction ───────────────────────────
 async function scrapeSheriffSales(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
+  // Hamilton County uses RealAuction for online sheriff sales — JS-rendered. Fetch outside the try
+  // so an unreachable auction portal records ERR instead of a silent 0.
+  const url =
+    "https://hamilton.sheriffsaleauction.ohio.gov/index.cfm?zaction=AUCTION&zmethod=preview";
+  const res = await fetchRendered(url);
+  if (!res.ok) throw new Error(`Hamilton Sheriff Sale HTTP ${res.status} (RealAuction)`);
   try {
-    // Hamilton County uses RealAuction for online sheriff sales
-    // This is a JS-rendered page — use fetchRendered
-    const url =
-      "https://hamilton.sheriffsaleauction.ohio.gov/index.cfm?zaction=AUCTION&zmethod=preview";
-    const res = await fetchRendered(url);
-    if (!res.ok) return leads;
     const html = await res.text();
 
     const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
@@ -171,11 +172,11 @@ const HAMILTON_TAX_MAX_ROWS = 500;
 async function scrapeTaxDelinquent(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
   const sourceUrl = "https://www.hcauditor.org/download/Delinquent/unpaid.xlsx";
+  const res = await fetchWithRetry(sourceUrl, {
+    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+  });
+  if (!res.ok) throw new Error(`Hamilton Tax Delinquent HTTP ${res.status} (hcauditor XLSX)`);
   try {
-    const res = await fetchWithRetry(sourceUrl, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-    });
-    if (!res.ok) return leads;
     const buf = Buffer.from(await res.arrayBuffer());
     const wb = XLSX.read(buf, { type: "buffer" });
     const sheet = wb.Sheets[wb.SheetNames[0]];
@@ -343,11 +344,11 @@ const DISTRESS_CV_CLAUSE =
 
 async function scrapeCodeViolationsHamilton(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
+  const where = `entered_date>'${fromDate}' AND ${DISTRESS_CV_CLAUSE}`;
+  const url = `https://data.cincinnati-oh.gov/resource/cncm-znd6.json?$where=${encodeURIComponent(where)}&$limit=400&$order=${encodeURIComponent("entered_date DESC")}`;
+  const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`Hamilton Code Violation HTTP ${res.status} (Cincinnati Socrata)`);
   try {
-    const where = `entered_date>'${fromDate}' AND ${DISTRESS_CV_CLAUSE}`;
-    const url = `https://data.cincinnati-oh.gov/resource/cncm-znd6.json?$where=${encodeURIComponent(where)}&$limit=400&$order=${encodeURIComponent("entered_date DESC")}`;
-    const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
-    if (!res.ok) return leads;
     const data = (await res.json()) as Record<string, string>[];
 
     const rows = data
@@ -399,8 +400,9 @@ async function scrapeCodeViolationsHamilton(fromDate: string, toDate: string): P
         });
       }
     }
+    logger.info({ leadType: "Code Violation", rows: rows.length, leads: leads.length }, "Hamilton code violations completed");
   } catch (e) {
-    console.error("[Hamilton OH] Code Violations error:", e);
+    logger.warn({ err: (e as Error).message }, "[Hamilton OH] Code Violations parse/enrich failed");
   }
   return leads;
 }
@@ -419,7 +421,8 @@ async function scrapeFireDamage(fromDate: string, toDate: string): Promise<Lead[
       // Fallback: Cincinnati Fire Department incident page
       const fallbackUrl = "https://www.cincinnati-oh.gov/fire/incident-reports/";
       const r2 = await fetchWithRetry(fallbackUrl);
-      if (!r2.ok) return leads;
+      if (!r2.ok)
+        throw new Error(`Hamilton Fire Damage HTTP ${res.status}/${r2.status} (Socrata + fallback both down)`);
       const html = await r2.text();
       const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
       const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
@@ -502,7 +505,10 @@ async function scrapeFireDamage(fromDate: string, toDate: string): Promise<Lead[
       });
     }
   } catch (e) {
-    console.error("[Hamilton OH] Fire Damage error:", e);
+    // Both the Socrata feed and the HTML fallback failing is an infra failure — surface it as ERR
+    // rather than a silent 0. A genuinely empty (but reachable) feed returns [] without throwing.
+    logger.warn({ err: (e as Error).message }, "[Hamilton OH] Fire Damage failed");
+    throw e;
   }
   return leads;
 }
@@ -515,10 +521,12 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
     "https://ecf.ohnb.uscourts.gov/cgi-bin/rss_outside.pl", // Northern OH (Cleveland, Akron)
   ];
 
+  let okFeeds = 0;
   for (const feedUrl of feeds) {
     try {
       const rss = await fetchWithRetry(feedUrl);
       if (!rss.ok) continue;
+      okFeeds++;
       const xml = await rss.text();
       const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
       // Parse all items first
@@ -603,9 +611,11 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
         }
       }
     } catch (e) {
-      console.error("[OH] Bankruptcy RSS error:", e);
+      logger.warn({ feedUrl, err: (e as Error).message }, "[OH] Bankruptcy RSS feed failed");
     }
   }
+  // One feed down is tolerable (the loop continues); every feed unreachable is an infra failure.
+  if (okFeeds === 0) throw new Error("OH Bankruptcy: all PACER RSS feeds unreachable");
   return leads;
 }
 
@@ -887,10 +897,10 @@ async function scrapeRegistryByPoint(
   note: string,
 ): Promise<Lead[]> {
   const leads: Lead[] = [];
+  const url = `https://data.cincinnati-oh.gov/resource/w3jp-dfxy.json?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent("entered_date DESC")}&$limit=400`;
+  const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`Hamilton ${leadType} HTTP ${res.status} (Cincinnati registry)`);
   try {
-    const url = `https://data.cincinnati-oh.gov/resource/w3jp-dfxy.json?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent("entered_date DESC")}&$limit=400`;
-    const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
-    if (!res.ok) return leads;
     const data = (await res.json()) as Record<string, string>[];
     const rows = data.filter((it) => it.latitude && it.longitude);
 
@@ -942,8 +952,9 @@ async function scrapeRegistryByPoint(
         });
       }
     }
+    logger.info({ leadType, rows: rows.length, leads: leads.length }, "Hamilton registry rows completed to leads");
   } catch (e) {
-    console.error(`[Hamilton OH] ${leadType} error:`, e);
+    logger.warn({ leadType, err: (e as Error).message }, "[Hamilton OH] registry parse/enrich failed");
   }
   return leads;
 }

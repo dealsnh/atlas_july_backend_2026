@@ -1,10 +1,13 @@
 import type { Request, Response } from "express";
+import { normalizeLeadType } from "../config/county-lead-types.js";
 import { getScrapeRuns } from "../repositories/scrape-runs.repository.js";
 import {
+  buildCountyConfigs,
   getDateRange,
   getScrapeStatus,
   runScrapeJob,
   startScrapeJob,
+  type ScrapeFilter,
 } from "../services/scrape.service.js";
 import { ApiError } from "../utils/api-error.js";
 import { successResponse } from "../utils/api-response.js";
@@ -23,17 +26,38 @@ export function triggerScrapeHandler(req: Request, res: Response): void {
     throw ApiError.conflict("Scrape already in progress");
   }
 
-  const body = req.body as { from_date?: string; to_date?: string };
+  const body = req.body as {
+    from_date?: string;
+    to_date?: string;
+    county?: string;
+    lead_type?: string;
+  };
   const fromDate = body.from_date || getDateRange(1).fromDate;
   const toDate = body.to_date || getDateRange(0).toDate;
 
-  startScrapeJob(fromDate, toDate);
+  const leadType =
+    typeof body.lead_type === "string" && body.lead_type.trim()
+      ? normalizeLeadType(body.lead_type)
+      : undefined;
+  const county = typeof body.county === "string" && body.county.trim() ? body.county : undefined;
+  const filter: ScrapeFilter | undefined =
+    leadType || county ? { county, leadTypes: leadType ? [leadType] : undefined } : undefined;
+
+  if (filter && buildCountyConfigs(filter).length === 0) {
+    throw ApiError.badRequest(
+      `No configured scraper matches${county ? ` county "${county}"` : ""}${leadType ? ` lead type "${leadType}"` : ""}`,
+    );
+  }
+
+  startScrapeJob(fromDate, toDate, filter);
 
   successResponse(res, 200, undefined, {
     ok: true,
-    message: "Scrape started",
+    message: leadType ? `Scrape started (${leadType} only)` : "Scrape started",
     from_date: fromDate,
     to_date: toDate,
+    lead_type: leadType,
+    county,
   });
 }
 

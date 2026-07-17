@@ -52,17 +52,64 @@ export async function getLastScrapeTimeValue(): Promise<string | null> {
   return lastScrapeTime;
 }
 
-function buildCountyConfigs(): CountyConfig[] {
-  return clientConfig.counties.map((county) => ({
-    name: county.name || county.county,
-    state: county.state,
-    leadTypes: resolveCountyLeadTypes(county),
-    publicsearch_slug: county.publicsearch_slug,
-    publicsearch_state: county.publicsearch_state,
-  }));
+/** Optional targeting for a manual run: restrict to one county and/or specific lead types. */
+export interface ScrapeFilter {
+  county?: string;
+  leadTypes?: string[];
 }
 
-export async function runScrapeJob(fromDate: string, toDate: string): Promise<number> {
+export function buildCountyConfigs(filter?: ScrapeFilter): CountyConfig[] {
+  return clientConfig.counties
+    .filter((county) => !filter?.county || (county.name || county.county) === filter.county)
+    .map((county) => {
+      const leadTypes = resolveCountyLeadTypes(county);
+      return {
+        name: county.name || county.county,
+        state: county.state,
+        leadTypes: filter?.leadTypes?.length
+          ? leadTypes.filter((t) => filter.leadTypes?.includes(t))
+          : leadTypes,
+        publicsearch_slug: county.publicsearch_slug,
+        publicsearch_state: county.publicsearch_state,
+      };
+    })
+    .filter((county) => county.leadTypes.length > 0);
+}
+
+/**
+ * Distill the per-scraper progress lines (from runAllScrapers) into a compact `label=count` /
+ * `label=ERR(...)` summary, persisted on the run so a scraper that returned 0 — which writes no
+ * raw_leads and is otherwise indistinguishable from "never dispatched" — is visible after the fact.
+ *
+ * Tina's multi-state dispatcher emits county/source-level totals ("✓ Clay MO: 5 leads",
+ * "✓ AL Bankruptcy: 3 leads", "✓ roll-derived Jackson MO: 10 leads", "✓ publicsearch Hamilton: 2
+ * leads") and folds per-sub-scraper failures into a single "⚠ N errors: <County ST Type>: msg; ..."
+ * line — both are surfaced here. Counts are raw scraper output (pre-save dedup/enrichment).
+ */
+export function summarizeScraperResults(log: string[]): string {
+  const out: string[] = [];
+  for (const line of log) {
+    const ok = line.match(/^✓ (.+): (\d+) leads$/);
+    if (ok?.[1]) {
+      out.push(`${ok[1]}=${ok[2] ?? "0"}`);
+      continue;
+    }
+    const errs = line.match(/^⚠ \d+ errors?: (.+)$/);
+    if (errs?.[1]) {
+      for (const piece of errs[1].split("; ")) {
+        const m = piece.match(/^(?:Error scraping )?(.+?): (.+)$/);
+        if (m?.[1]) out.push(`${m[1].trim()}=ERR(${(m[2] ?? "").slice(0, 60)})`);
+      }
+    }
+  }
+  return out.join(" ").slice(0, 3500);
+}
+
+export async function runScrapeJob(
+  fromDate: string,
+  toDate: string,
+  filter?: ScrapeFilter,
+): Promise<number> {
   if (scrapeInProgress) {
     throw new Error("Scrape already in progress");
   }
@@ -154,7 +201,10 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
 
   try {
     runId = await logScrapeRun(fromDate, toDate);
-    const counties = buildCountyConfigs();
+    const counties = buildCountyConfigs(filter);
+    if (filter?.leadTypes?.length) {
+      lastScrapeLog.push(`Targeted run: ${filter.leadTypes.join(", ")} only`);
+    }
     const { errors } = await runAllScrapers(
       counties,
       fromDate,
@@ -179,12 +229,13 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
     lastScrapeTime = new Date().toISOString();
     await setLastScrapeTime(lastScrapeTime);
     lastScrapeTimeLoaded = true;
-    await finishScrapeRun(runId, totalNew);
+    await finishScrapeRun(runId, totalNew, undefined, summarizeScraperResults(lastScrapeLog));
     logger.info({ totalNew }, "Scrape complete");
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     if (runId !== null) {
-      await finishScrapeRun(runId, totalNew, errMsg);
+      const perType = summarizeScraperResults(lastScrapeLog);
+      await finishScrapeRun(runId, totalNew, perType ? `${errMsg} | ${perType}` : errMsg);
     }
     throw error;
   } finally {
@@ -194,8 +245,8 @@ export async function runScrapeJob(fromDate: string, toDate: string): Promise<nu
   return totalNew;
 }
 
-export function startScrapeJob(fromDate: string, toDate: string): void {
-  runScrapeJob(fromDate, toDate).catch((error) => {
+export function startScrapeJob(fromDate: string, toDate: string, filter?: ScrapeFilter): void {
+  runScrapeJob(fromDate, toDate, filter).catch((error) => {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error({ err: error }, `Background scrape failed: ${errMsg}`);
   });

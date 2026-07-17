@@ -14,12 +14,17 @@ export async function finishScrapeRun(
   id: number,
   leadsFound: number,
   error?: string,
+  // Per-scraper result summary (e.g. "Hamilton OH=18 AL Bankruptcy=0 Jackson MO Tax Delinquent=ERR(...)").
+  // Persisted in the existing `error` column on SUCCESS so a scraper that returned 0 — which writes no
+  // raw_leads and is otherwise indistinguishable from "never dispatched" — is visible after the fact.
+  // A real error takes precedence (and flips status to "error"); the summary only fills in when none.
+  summary?: string,
 ): Promise<void> {
   await execute(
     `UPDATE scrape_runs
      SET finished_at = NOW(), status = $1, leads_found = $2, error = $3
      WHERE id = $4`,
-    [error ? "error" : "success", leadsFound, error ?? null, id],
+    [error ? "error" : "success", leadsFound, error ?? summary ?? null, id],
   );
 }
 

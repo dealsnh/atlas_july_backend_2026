@@ -27,6 +27,7 @@ import {
 } from "./craigslist.js";
 import * as XLSX from "xlsx";
 import { extractAddressFromListing } from "../services/owner-placeholders.js";
+import { logger } from "../utils/logger.js";
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -997,10 +998,12 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
       counties: ["Montgomery", "Autauga", "Elmore"],
     },
   ];
+  let okFeeds = 0;
   try {
     for (const feed of RSS_FEEDS) {
       const rss = await fetchWithRetry(feed.url);
       if (!rss.ok) continue;
+      okFeeds++;
       const xml = await rss.text();
       const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
       // Parse all items first
@@ -1100,8 +1103,10 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
       }
     }
   } catch (e) {
-    console.error("[AL] Bankruptcy RSS error:", e);
+    logger.warn({ err: (e as Error).message }, "[AL] Bankruptcy RSS failed");
   }
+  // One district feed down is tolerable; every feed unreachable is an infra failure, not "no filings".
+  if (okFeeds === 0) throw new Error("AL Bankruptcy: all PACER RSS feeds unreachable");
   return leads;
 }
 
@@ -1123,6 +1128,9 @@ export async function scrapeCodeViolations(fromDate: string, toDate: string): Pr
       const rendered = await fetchRendered(url);
       if (rendered.ok) html = await rendered.text();
     }
+    // Both the direct and rendered fetches returning nothing is an infra failure — a reachable
+    // portal returns HTML even with zero open cases. Throw so it records ERR, not a silent 0.
+    if (!html) throw new Error("AL Jefferson Code Violation: jeffcointouch unreachable");
     if (html) {
       const rowRe = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
       const cellRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
@@ -1171,7 +1179,8 @@ export async function scrapeCodeViolations(fromDate: string, toDate: string): Pr
       }
     }
   } catch (e) {
-    console.error("[AL] Jefferson Code Violations error:", e);
+    logger.warn({ err: (e as Error).message }, "[AL] Jefferson Code Violations failed");
+    throw e;
   }
 
   return leads;
@@ -1185,11 +1194,13 @@ export async function scrapeOutOfStateOwners(fromDate: string, toDate: string): 
 // Enrichment: lookupByAddress → owner name from county assessor
 export async function scrapeVacantAbandoned(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
+  // Birmingham Open Data — vacant/abandoned structures. Fetch outside the try so a dead endpoint
+  // records ERR instead of a silent 0.
+  const url = `https://data.birminghamal.gov/resource/vacant-structures.json?$where=date_reported>='${fromDate}T00:00:00'&$limit=200&$order=date_reported DESC`;
+  const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`AL Vacant/Abandoned HTTP ${res.status} (Birmingham open data)`);
   try {
-    // Birmingham Open Data — vacant/abandoned structures
-    const url = `https://data.birminghamal.gov/resource/vacant-structures.json?$where=date_reported>='${fromDate}T00:00:00'&$limit=200&$order=date_reported DESC`;
-    const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
-    if (res.ok) {
+    {
       const data = (await res.json()) as Record<string, string>[];
       for (const item of data) {
         const address = item.address || item.street_address || "";

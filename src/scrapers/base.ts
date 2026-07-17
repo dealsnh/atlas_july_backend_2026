@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { spawnSync } from "child_process";
 import { createHash } from "crypto";
+import { logger } from "../utils/logger.js";
 
 export interface Lead {
   id: string;
@@ -117,12 +118,24 @@ export async function fetchWithRetry(
         clearTimeout(timeoutId);
       }
       if (res.ok || res.status === 404) return res;
+      // Log the TARGET url, NEVER fetchUrl (it embeds the ScraperAPI key). The body head is where
+      // a proxy explains itself ("Your account is frozen", credit limits, WAF blocks) — the signal
+      // that turns a silent fake-0 into a diagnosable failure.
+      const bodyHead = (await res.clone().text().catch(() => "")).slice(0, 200).replace(/\s+/g, " ");
+      logger.warn(
+        { url, status: res.status, attempt: i + 1, proxied: useProxy, body: bodyHead },
+        "Scraper fetch non-OK",
+      );
       if (res.status === 429 || res.status >= 500) {
         await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
         continue;
       }
       return res;
     } catch (e) {
+      logger.warn(
+        { url, attempt: i + 1, proxied: useProxy, err: (e as Error).message },
+        "Scraper fetch threw",
+      );
       if (i === retries - 1) throw e;
       await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
     }
@@ -155,12 +168,21 @@ export async function fetchRendered(url: string, retries = 2): Promise<Response>
         clearTimeout(timeoutId);
       }
       if (res.ok || res.status === 404) return res;
+      const bodyHead = (await res.clone().text().catch(() => "")).slice(0, 200).replace(/\s+/g, " ");
+      logger.warn(
+        { url, status: res.status, attempt: i + 1, rendered: true, body: bodyHead },
+        "Scraper fetch non-OK",
+      );
       if (res.status === 429 || res.status >= 500) {
         await new Promise((r) => setTimeout(r, 3000 * (i + 1)));
         continue;
       }
       return res;
     } catch (e) {
+      logger.warn(
+        { url, attempt: i + 1, rendered: true, err: (e as Error).message },
+        "Scraper fetch threw",
+      );
       if (i === retries - 1) throw e;
       await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
     }
@@ -168,9 +190,14 @@ export async function fetchRendered(url: string, retries = 2): Promise<Response>
   throw new Error(`fetchRendered failed after ${retries} retries: ${url}`);
 }
 
-function looksBlocked(html: string): boolean {
+/**
+ * True when a 200 response body is actually a block/challenge/busy interstitial, not content.
+ * Rate-limiters and WAFs answer HTTP 200 with one of these — a parser fed such a page yields 0
+ * rows, which must be treated as an infrastructure failure, never "no records".
+ */
+export function looksBlocked(html: string): boolean {
   if (!html || html.length < 150) return true;
-  return /403 Forbidden|Error 403|Access Denied|data scraper|expressly prohibited|cf-browser-verification|Just a moment|captcha|g-recaptcha|login required|please sign in|session expired|enable javascript|frmlogin\.aspx/i.test(
+  return /403 Forbidden|Error 403|Access Denied|data scraper|expressly prohibited|cf-browser-verification|Just a moment|Server busy|too many requests|captcha|g-recaptcha|login required|please sign in|session expired|enable javascript|frmlogin\.aspx/i.test(
     html,
   );
 }
@@ -183,12 +210,12 @@ export function validateHtmlResponse(
 ): { ok: boolean; reason?: string } {
   if (!html || html.trim().length < minLength) {
     const reason = `${label}: empty or too-short response (${html?.length ?? 0} bytes)`;
-    console.warn(`[validateHtml] ${reason}`);
+    logger.warn({ label }, reason);
     return { ok: false, reason };
   }
   if (looksBlocked(html)) {
     const reason = `${label}: blocked, CAPTCHA, or login page detected`;
-    console.warn(`[validateHtml] ${reason}`);
+    logger.warn({ label }, reason);
     return { ok: false, reason };
   }
   return { ok: true };
@@ -339,9 +366,13 @@ export async function fetchBlockedPage(url: string, options: RequestInit = {}): 
       if (res.ok) {
         const t = await res.text();
         if (t && !looksBlocked(t)) return t;
+      } else {
+        // Log the target url, NEVER proxyUrl (it embeds the ScraperAPI key).
+        const bodyHead = (await res.text().catch(() => "")).slice(0, 200).replace(/\s+/g, " ");
+        logger.warn({ url, status: res.status, proxied: true, body: bodyHead }, "Scraper fetch non-OK");
       }
-    } catch {
-      /* try rendered */
+    } catch (e) {
+      logger.warn({ url, proxied: true, err: (e as Error).message }, "Scraper fetch threw");
     }
 
     if (!isCraigslist) {
@@ -362,7 +393,7 @@ export async function fetchBlockedPage(url: string, options: RequestInit = {}): 
   if (bright) lastReason = "bright_data_blocked";
 
   if (!html && lastReason !== "empty") {
-    console.warn(`[fetchBlockedPage] ${lastReason}: ${url.slice(0, 120)}`);
+    logger.warn({ url: url.slice(0, 120), reason: lastReason }, "fetchBlockedPage exhausted");
   }
   return html;
 }
@@ -415,7 +446,7 @@ export function settleScraperResults(
       leads.push(...result.value);
     } else {
       const msg = `${label}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`;
-      console.error(`[scraper] ${msg}`);
+      logger.error({ label }, msg);
       errors?.push(msg);
     }
   }

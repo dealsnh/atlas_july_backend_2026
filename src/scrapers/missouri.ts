@@ -40,6 +40,7 @@ import {
 } from "./craigslist.js";
 import { lookupOwnerProperties, lookupByAddress, isGovernmentOwner } from "./assessor.js";
 import { scrapeFsbo } from "./fsbo.js";
+import { logger } from "../utils/logger.js";
 
 const STATE = "MO";
 const OUTER_MO_COUNTIES = new Set(["clay", "platte", "cass"]);
@@ -91,7 +92,10 @@ async function searchCaseNet(
 ): Promise<CaseNetRow[]> {
   const all: CaseNetRow[] = [];
   const seen = new Set<string>();
+  let windows = 0;
+  let blocked = 0;
   for (const window of caseNetWeekStarts(fromDate, toDate)) {
+    windows++;
     const body = new URLSearchParams({
       countyCode,
       caseType,
@@ -105,13 +109,23 @@ async function searchCaseNet(
       body,
     });
     const check = validateHtmlResponse(html, `${label} (${window.from}-${window.to})`);
-    if (!check.ok) continue;
+    if (!check.ok) {
+      blocked++;
+      continue;
+    }
     for (const row of parseCaseNetRows(html, fromDate)) {
       if (seen.has(row.caseNum)) continue;
       seen.add(row.caseNum);
       all.push(row);
     }
   }
+  // Case.net TCP-drops datacenter IPs (needs the Bright Data residential proxy). A valid but empty
+  // week returns a full page (check.ok), so EVERY window failing validation is a block, not "no
+  // cases" — throw so the run records ERR instead of a clean fake 0.
+  if (windows > 0 && blocked === windows) {
+    throw new Error(`Case.net blocked/unreachable for ${label} — all ${windows} window(s) failed (needs residential proxy)`);
+  }
+  logger.info({ label, windows, blocked, cases: all.length }, "Case.net search collected cases");
   return all;
 }
 
@@ -311,6 +325,10 @@ async function scrapeJacksonTaxDelinquent(fromDate: string, toDate: string): Pro
   const leads: Lead[] = [];
   const COUNTY = "Jackson";
   const MAX_PAGES = 100;
+  // Page-0 reachability check outside the try: a dead 16th-circuit portal must record ERR, not
+  // break the pagination loop to a clean fake 0.
+  const preflight = await fetchWithRetry(DLT_BROWSE_URL);
+  if (!preflight.ok) throw new Error(`Jackson Tax Delinquent HTTP ${preflight.status} (16thcircuit)`);
   try {
     for (let index = 0; index < MAX_PAGES; index++) {
       const pageUrl = index === 0 ? DLT_BROWSE_URL : `${DLT_BROWSE_URL}?index=${index}`;
@@ -383,12 +401,12 @@ async function scrapeJacksonTaxDelinquent(fromDate: string, toDate: string): Pro
 async function scrapeJacksonSheriffSales(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
   const COUNTY = "Jackson";
+  // Jackson County Sheriff — civil process / foreclosure sales. Fetch outside the try so an
+  // unreachable page records ERR instead of a silent 0.
+  const url = "https://www.jacksongov.org/government/departments/sheriff/civil-process";
+  const res = await fetchWithRetry(url);
+  if (!res.ok) throw new Error(`Jackson Sheriff Sale HTTP ${res.status}`);
   try {
-    // Jackson County Sheriff — civil process / foreclosure sales
-    const url = "https://www.jacksongov.org/government/departments/sheriff/civil-process";
-    const res = await fetchWithRetry(url);
-    if (!res.ok) return leads;
-
     const html = await res.text();
     const $ = cheerio.load(html);
 
@@ -661,9 +679,9 @@ async function scrapePlatteCaseNet(
 async function scrapePlatteBankruptcy(fromDate: string, toDate: string): Promise<Lead[]> {
   const COUNTY = "Platte";
   const leads: Lead[] = [];
+  const rss = await fetchWithRetry("https://ecf.mowb.uscourts.gov/cgi-bin/rss_outside.pl");
+  if (!rss.ok) throw new Error(`Platte Bankruptcy PACER RSS HTTP ${rss.status}`);
   try {
-    const rss = await fetchWithRetry("https://ecf.mowb.uscourts.gov/cgi-bin/rss_outside.pl");
-    if (!rss.ok) return leads;
     const xml = await rss.text();
     const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
     type BkItem = { caseNum: string; caseName: string; pubDate: string; link: string };
@@ -1101,10 +1119,14 @@ async function scrapeKcSocrataComplete(
   descOf: (it: Record<string, string>) => string,
 ): Promise<Lead[]> {
   const leads: Lead[] = [];
+  const url = `https://data.kcmo.org/resource/${datasetId}.json?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(order)}&$limit=1000`;
+  const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) {
+    // KCMO Socrata throttles/blocks datacenter IPs (non-OK from Railway) — infra failure, not "no
+    // cases". Throw so the run records ERR instead of a silent 0 for Code Violation / Vacant.
+    throw new Error(`KC Socrata ${leadType} HTTP ${res.status} (${datasetId})`);
+  }
   try {
-    const url = `https://data.kcmo.org/resource/${datasetId}.json?$where=${encodeURIComponent(where)}&$order=${encodeURIComponent(order)}&$limit=1000`;
-    const res = await fetchWithRetry(url, { headers: { Accept: "application/json" } });
-    if (!res.ok) return leads;
     const data = (await res.json()) as Record<string, string>[];
 
     const seen = new Set<string>();
@@ -1154,8 +1176,9 @@ async function scrapeKcSocrataComplete(
         });
       }
     }
+    logger.info({ leadType, rows: rows.length, leads: leads.length }, "KC Socrata rows completed to leads");
   } catch (e) {
-    console.error(`[MO] KC ${leadType} error:`, e);
+    logger.warn({ leadType, err: (e as Error).message }, `KC ${leadType} parse/enrich failed`);
   }
   return leads;
 }
@@ -1708,9 +1731,9 @@ async function scrapeMOVacantAbandoned(fromDate: string, toDate: string): Promis
 // ─── BANKRUPTCY — Western District of MO (PACER RSS) ─────────────────────────
 export async function scrapeBankruptcy(fromDate: string, toDate: string): Promise<Lead[]> {
   const leads: Lead[] = [];
+  const rss = await fetchWithRetry("https://ecf.mowb.uscourts.gov/cgi-bin/rss_outside.pl");
+  if (!rss.ok) throw new Error(`MO Bankruptcy PACER RSS HTTP ${rss.status}`);
   try {
-    const rss = await fetchWithRetry("https://ecf.mowb.uscourts.gov/cgi-bin/rss_outside.pl");
-    if (!rss.ok) return leads;
     const xml = await rss.text();
     const COUNTY = "Jackson"; // Western MO district covers KC/Jackson area
     const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];

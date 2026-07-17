@@ -45,6 +45,8 @@ export const testEmailSchema = z.object({
 export const scrapeTriggerSchema = z.object({
   from_date: z.string().optional(),
   to_date: z.string().optional(),
+  county: z.string().optional(),
+  lead_type: z.string().optional(),
 });
 
 export const historicalScrapeSchema = z.object({
