@@ -24,7 +24,12 @@ import { isGovernmentOwner } from "../scrapers/assessor.js";
 import { logger } from "../utils/logger.js";
 import { enrichLeads, enrichmentStatus, isLeadSaveable } from "./enrichment.service.js";
 import { sendDailyReport } from "./email.service.js";
-import { getEmailRecipients, getRawSettings, isSmtpReady } from "./settings.service.js";
+import {
+  getEmailRecipients,
+  getRawSettings,
+  isDailyScrapePaused,
+  isSmtpReady,
+} from "./settings.service.js";
 
 let scrapeInProgress = false;
 let lastScrapeLog: string[] = [];
@@ -252,10 +257,22 @@ export function startScrapeJob(fromDate: string, toDate: string, filter?: Scrape
   });
 }
 
+export const DAILY_CRON_EXPRESSION = "0 9 * * *";
+export const DAILY_CRON_TIMEZONE = "America/Los_Angeles";
+
 export function startDailyCron(): void {
   cron.schedule(
-    "0 9 * * *",
+    DAILY_CRON_EXPRESSION,
     async () => {
+      try {
+        if (await isDailyScrapePaused()) {
+          logger.info("Daily scrape skipped — paused by client");
+          return;
+        }
+      } catch (error) {
+        logger.error({ err: error }, "Could not read daily scrape pause flag — running scrape");
+      }
+
       logger.info("Running daily scrape at 9:00 AM PT");
       const { fromDate, toDate } = getDateRange(env.SCRAPE_LOOKBACK_DAYS);
 
@@ -287,7 +304,7 @@ export function startDailyCron(): void {
         logger.error({ err: error }, `Daily scrape failed: ${errMsg}`);
       }
     },
-    { timezone: "America/Los_Angeles" },
+    { timezone: DAILY_CRON_TIMEZONE },
   );
 
   logger.info(

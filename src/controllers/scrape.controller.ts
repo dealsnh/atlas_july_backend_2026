@@ -3,12 +3,15 @@ import { normalizeLeadType } from "../config/county-lead-types.js";
 import { getScrapeRuns } from "../repositories/scrape-runs.repository.js";
 import {
   buildCountyConfigs,
+  DAILY_CRON_EXPRESSION,
+  DAILY_CRON_TIMEZONE,
   getDateRange,
   getScrapeStatus,
   runScrapeJob,
   startScrapeJob,
   type ScrapeFilter,
 } from "../services/scrape.service.js";
+import { isDailyScrapePaused, setDailyScrapePaused } from "../services/settings.service.js";
 import { ApiError } from "../utils/api-error.js";
 import { successResponse } from "../utils/api-response.js";
 
@@ -18,6 +21,26 @@ export function getScrapeStatusHandler(_req: Request, res: Response): void {
 
 export async function getScrapeRunsHandler(_req: Request, res: Response): Promise<void> {
   successResponse(res, 200, undefined, { runs: await getScrapeRuns(200) });
+}
+
+export async function getScrapeScheduleHandler(_req: Request, res: Response): Promise<void> {
+  const paused = await isDailyScrapePaused();
+  successResponse(res, 200, undefined, {
+    paused,
+    cron: DAILY_CRON_EXPRESSION,
+    timezone: DAILY_CRON_TIMEZONE,
+  });
+}
+
+export async function setScrapeScheduleHandler(req: Request, res: Response): Promise<void> {
+  const { paused } = req.body as { paused: boolean };
+  await setDailyScrapePaused(paused);
+
+  successResponse(res, 200, undefined, {
+    ok: true,
+    paused,
+    message: paused ? "Daily scrape paused" : "Daily scrape resumed",
+  });
 }
 
 export function triggerScrapeHandler(req: Request, res: Response): void {

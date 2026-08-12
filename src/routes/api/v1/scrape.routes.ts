@@ -1,14 +1,20 @@
 import { Router, type IRouter } from "express";
 import {
   getScrapeRunsHandler,
+  getScrapeScheduleHandler,
   getScrapeStatusHandler,
   scrapeStreamHandler,
+  setScrapeScheduleHandler,
   triggerHistoricalScrapeHandler,
   triggerScrapeHandler,
 } from "../../../controllers/scrape.controller.js";
 import { authMiddleware } from "../../../middleware/auth.js";
 import { validate } from "../../../middleware/validate.js";
-import { historicalScrapeSchema, scrapeTriggerSchema } from "../../../schemas/api.schema.js";
+import {
+  historicalScrapeSchema,
+  scrapeScheduleSchema,
+  scrapeTriggerSchema,
+} from "../../../schemas/api.schema.js";
 import { asyncHandler } from "../../../utils/async-handler.js";
 
 const router: IRouter = Router();
@@ -20,6 +26,13 @@ router.post(
   asyncHandler(triggerScrapeHandler),
 );
 router.get("/status", asyncHandler(getScrapeStatusHandler));
+router.get("/schedule", asyncHandler(getScrapeScheduleHandler));
+router.post(
+  "/schedule",
+  asyncHandler(authMiddleware),
+  validate(scrapeScheduleSchema),
+  asyncHandler(setScrapeScheduleHandler),
+);
 router.get("/stream", asyncHandler(scrapeStreamHandler));
 router.get("/runs", asyncHandler(getScrapeRunsHandler));
 router.post(

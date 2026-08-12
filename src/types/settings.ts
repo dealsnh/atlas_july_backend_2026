@@ -11,6 +11,7 @@ export interface AppSettings {
   bright_data_user: string;
   bright_data_pass: string;
   attom_api_key: string;
+  daily_scrape_paused: string;
 }
 
 export type SettingsKey = keyof AppSettings;
@@ -28,6 +29,7 @@ export const SETTINGS_KEYS: SettingsKey[] = [
   "bright_data_user",
   "bright_data_pass",
   "attom_api_key",
+  "daily_scrape_paused",
 ];
 
 export const SECRET_MASK = "••••••••••••••••";

@@ -35,8 +35,13 @@ export const settingsSchema = z
     bright_data_user: z.string().optional(),
     bright_data_pass: z.string().optional(),
     attom_api_key: z.string().optional(),
+    daily_scrape_paused: z.enum(BOOLEAN_STRING).optional(),
   })
   .strict();
+
+export const scrapeScheduleSchema = z.object({
+  paused: z.boolean(),
+});
 
 export const testEmailSchema = z.object({
   email: z.string().email().optional(),

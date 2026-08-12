@@ -550,6 +550,90 @@ export const openApiPaths = {
       },
     },
   },
+  "/api/v1/scrape/schedule": {
+    get: {
+      tags: ["Scrape"],
+      summary: "Get daily scrape schedule state",
+      description: "Returns whether the automatic 9:00 AM PT daily scrape is paused.",
+      operationId: "getScrapeSchedule",
+      responses: {
+        "200": {
+          description: "Daily scrape schedule state",
+          content: {
+            "application/json": {
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                  {
+                    type: "object",
+                    properties: {
+                      data: {
+                        type: "object",
+                        properties: {
+                          paused: { type: "boolean", example: false },
+                          cron: { type: "string", example: "0 9 * * *" },
+                          timezone: { type: "string", example: "America/Los_Angeles" },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
+    post: {
+      tags: ["Scrape"],
+      summary: "Pause or resume the daily scrape",
+      description:
+        "Pauses (`paused: true`) or resumes (`paused: false`) the automatic 9:00 AM PT run. Manual scrapes are unaffected.",
+      operationId: "setScrapeSchedule",
+      security: authSecurity,
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["paused"],
+              properties: { paused: { type: "boolean", example: true } },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Updated daily scrape schedule state",
+          content: {
+            "application/json": {
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/ApiSuccessEnvelope" },
+                  {
+                    type: "object",
+                    properties: {
+                      data: {
+                        type: "object",
+                        properties: {
+                          ok: { type: "boolean", example: true },
+                          paused: { type: "boolean", example: true },
+                          message: { type: "string", example: "Daily scrape paused" },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+        "400": openApiResponses.BadRequest,
+        "401": openApiResponses.Unauthorized,
+      },
+    },
+  },
   "/api/v1/scrape/stream": {
     get: {
       tags: ["Scrape"],

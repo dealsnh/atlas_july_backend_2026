@@ -39,7 +39,19 @@ export async function getMaskedSettings() {
     skip_trace_configured: !!s.skip_trace_key,
     bright_data_configured: !!(s.bright_data_user && s.bright_data_pass),
     attom_configured: !!s.attom_api_key,
+    daily_scrape_paused: s.daily_scrape_paused === "true",
   };
+}
+
+/** True when the client has paused the 9:00 AM PT daily scrape. */
+export async function isDailyScrapePaused(): Promise<boolean> {
+  const settings = await getSettings();
+  return settings.daily_scrape_paused === "true";
+}
+
+export async function setDailyScrapePaused(paused: boolean): Promise<void> {
+  await saveSettings({ daily_scrape_paused: paused ? "true" : "false" });
+  logger.info({ paused }, paused ? "Daily scrape paused" : "Daily scrape resumed");
 }
 
 export async function updateSettings(body: Record<string, unknown>): Promise<void> {
