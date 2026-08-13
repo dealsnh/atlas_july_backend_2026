@@ -204,6 +204,34 @@ const ROLL_SPECS: Record<string, RollSpec> = {
     defaultCity: "Montgomery",
     state: "AL",
   },
+  // Hamilton County TN — City of Chattanooga public-works GIS parcel layer
+  // (owner + situs + true mailing, 85,704 parcels, 23 placeholder rows).
+  // COVERAGE CAVEAT: this layer is CHATTANOOGA CITY LIMITS ONLY. The county-wide
+  // roll is 169,055 parcels and is published *only* as a 128 MB CSV zip
+  // (_downloadsAssessor/AssessorExportCSV.zip) — too large to hold in a request,
+  // so it is deliberately not the completer. Leads in Signal Mountain / Soddy-Daisy /
+  // Collegedale / unincorporated Hamilton will therefore fail to complete and be
+  // dropped by the save gate. Tax Delinquent does NOT depend on this — the Trustee
+  // delinquent file already carries owner+mailing+situs county-wide (see tennessee.ts).
+  // MASTNAME (not MASTNUM) holds the whole mailing street line; MASTNUM is blank.
+  "hamilton-tn": {
+    urls: [
+      env(
+        "HAMILTON_TN_PARCEL_QUERY_URL",
+        "https://pwgis.chattanooga.gov/arcgis/rest/services/Misc/Parcels/FeatureServer/0/query",
+      ),
+    ],
+    ownerField: "OWNERNAME1",
+    situsDisplayField: "ADDRESS",
+    mailFields: ["MASTNAME", "MALINE2"],
+    mailCityField: "MACITY",
+    mailStateField: "MASTATE",
+    mailZipField: "MAZIP",
+    // "154J A 015" — same shape the Herald foreclosure notices print as "Parcel ID".
+    parcelIdField: "TAX_MAP_NO",
+    defaultCity: "Chattanooga",
+    state: "TN",
+  },
 };
 
 function rollSpecKey(county: string, state: string): string {
@@ -1547,9 +1575,21 @@ export async function lookupOwnerProperties(
 // Only for counties whose roll is a queryable ArcGIS FeatureServer (ROLL_SPECS).
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Government / municipal / institutional owners — not sellable, excluded from leads. */
+/**
+ * Government / municipal / institutional owners — not sellable, excluded from leads.
+ *
+ * Bare "COUNTY" (not just "COUNTY OF") is matched because rolls record the county
+ * itself as "HAMILTON COUNTY", "HAMILTON COUNTY DEPT OF EDUCATION", "HAMILTON
+ * COUNTY & CHATT CITY OF" and so on — 349 parcels in Hamilton TN alone, none of
+ * which "COUNTY OF" catches. All 40 distinct owner strings containing "COUNTY" on
+ * that roll are government bodies.
+ *
+ * The federal land agencies and TVA/EPB are listed for the same reason: the
+ * National Park Service and Tennessee Valley Authority are large landowners around
+ * Chattanooga and were otherwise surfacing as Out-of-State Owner leads.
+ */
 const GOV_OWNER_RE =
-  /\b(CITY OF|COUNTY OF|STATE OF|TOWN OF|VILLAGE OF|UNITED STATES|U\.?S\.?A|HOUSING AUTHORITY|LAND BANK|LAND TRUST|SCHOOL|BOARD OF EDUC|UNIVERSITY|COLLEGE|CHURCH|MINISTR|FIRE DIST|FIRE PROTECT|WATER (DIST|WORKS|AUTH)|SEWER|PARK (DIST|BOARD)|DEPARTMENT OF|COMMISSION|AUTHORITY|CEMETERY|PRESERV|CONSERVAT|MUNICIPAL|REDEVELOP|HABITAT FOR|FANNIE MAE|FREDDIE MAC|FEDERAL (HOME|NATIONAL)|SECRETARY OF|VETERANS AFFAIRS|\bHUD\b|DRAINAGE|LEVEE|LIBRARY|HOSPITAL|FOUNDATION|GAS (CO|COMPANY|& |AND )|ELECTRIC (CO|COMPANY|POWER)|DUKE ENERGY|\bAEP\b|AMERICAN ELECTRIC|ENERGY (CO|CORP|INC|OHIO|LLC|SERVICES)|POWER (CO|COMPANY)|UTILIT|SANITARY|TRANSIT AUTH|PORT AUTH|TURNPIKE|RAILROAD|RAILWAY|\bRR CO|PIPELINE|TELEPHONE|ACADEMY|INSTITUTE|SEMINARY|ARCHDIOCESE|DIOCESE)/i;
+  /\b(CITY OF|COUNTY|STATE OF|TOWN OF|VILLAGE OF|UNITED STATES|U\.?S\.?A|NATIONAL PARK|PARK SERVICE|FOREST SERVICE|TENNESSEE VALLEY|TVA|ELECTRIC POWER BOARD|HOUSING AUTHORITY|LAND BANK|LAND TRUST|SCHOOL|BOARD OF EDUC|UNIVERSITY|COLLEGE|CHURCH|MINISTR|FIRE DIST|FIRE PROTECT|WATER (DIST|WORKS|AUTH)|SEWER|PARK (DIST|BOARD)|DEPARTMENT OF|COMMISSION|AUTHORITY|CEMETERY|PRESERV|CONSERVAT|MUNICIPAL|REDEVELOP|HABITAT FOR|FANNIE MAE|FREDDIE MAC|FEDERAL (HOME|NATIONAL)|SECRETARY OF|VETERANS AFFAIRS|\bHUD\b|DRAINAGE|LEVEE|LIBRARY|HOSPITAL|FOUNDATION|GAS (CO|COMPANY|& |AND )|ELECTRIC (CO|COMPANY|POWER)|DUKE ENERGY|\bAEP\b|AMERICAN ELECTRIC|ENERGY (CO|CORP|INC|OHIO|LLC|SERVICES)|POWER (CO|COMPANY)|UTILIT|SANITARY|TRANSIT AUTH|PORT AUTH|TURNPIKE|RAILROAD|RAILWAY|\bRR CO|PIPELINE|TELEPHONE|ACADEMY|INSTITUTE|SEMINARY|ARCHDIOCESE|DIOCESE)/i;
 
 export function isGovernmentOwner(name: string | null | undefined): boolean {
   const n = (name || "").toUpperCase();

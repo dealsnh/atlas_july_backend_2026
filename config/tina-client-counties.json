@@ -27,6 +27,11 @@
     "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "Pre-Foreclosure", "Out-of-State Owner", "Absentee Owner", "Long-Time Owner", "Senior Owner", "Code Violation", "Vacant/Abandoned", "FSBO"]
   },
   {
+    "name": "Hamilton",
+    "state": "TN",
+    "lead_types": ["Tax Delinquent", "Pre-Foreclosure", "Probate", "Code Violation", "Vacant/Abandoned", "Fire Damage", "Divorce", "Bankruptcy", "Out-of-State Owner", "Absentee Owner", "Obituary", "FSBO"]
+  },
+  {
     "name": "Jefferson",
     "state": "AL",
     "lead_types": ["Tax Delinquent", "Sheriff Sale", "Probate", "FSBO"]

@@ -75,7 +75,10 @@ export async function listLeads(
 
   const pendingFilters = {
     county: rest.county,
-    state: undefined as string | undefined,
+    // Carry the state through so the pending half of the list is scoped the same
+    // way as the complete half — otherwise filtering to Hamilton TN would still
+    // show Hamilton OH pending rows.
+    state: rest.state as string | undefined,
     lead_type: rest.lead_type,
     from_date: rest.from_date,
     to_date: rest.to_date,
@@ -122,6 +125,7 @@ export async function patchLead(id: string, status: string, notes?: string): Pro
 
 export async function purgeLeads(filter: {
   county?: string;
+  state?: string;
   source_url?: string;
   owner_name_contains?: string;
 }): Promise<number> {

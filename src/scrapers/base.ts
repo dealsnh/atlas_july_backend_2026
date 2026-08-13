@@ -78,6 +78,21 @@ const SKIP_SCRAPER_PATTERNS = [
   "countygovservices.com", // Madison County AL AssuranceWeb — direct HTML/session
   "rss_outside", // PACER RSS — requires direct (no ScraperAPI)
   "ecf.oh", // PACER Ohio — direct RSS works
+  // ── Hamilton County TN ──
+  // hamiltontn.gov serves the Trustee/Assessor bulk exports (multi-MB ZIPs) and the
+  // court docket PDFs. These MUST go direct: ScraperAPI is an HTML-oriented proxy and
+  // corrupts binary bodies, and a 21 MB transfer through it is pure waste. Verified
+  // reachable from a datacenter IP without a proxy.
+  "hamiltontn.gov",
+  // City of Chattanooga self-hosted ArcGIS (Hamilton TN parcel roll). The generic
+  // "arcgis/rest/services" rule already covers the query path; this also covers the
+  // service-metadata URLs.
+  "pwgis.chattanooga.gov",
+  // Hamilton County Herald — the county's legal newspaper, and the Pre-Foreclosure
+  // source. Serves fine to a direct request, so skip the proxy on the first attempt;
+  // fetchBlockedPage still falls back to ScraperAPI/Bright Data if a datacenter IP
+  // ever gets refused.
+  "hamiltoncountyherald.com",
 ];
 
 function shouldSkipScraperAPI(url: string): boolean {

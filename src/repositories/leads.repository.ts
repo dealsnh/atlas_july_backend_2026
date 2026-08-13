@@ -109,6 +109,11 @@ function buildFilterClause(
     clause += ` AND county = $${i++}`;
     params.push(filters.county);
   }
+  // Without this, selecting "Hamilton" returns Hamilton OH and Hamilton TN together.
+  if (filters.state) {
+    clause += ` AND UPPER(state) = UPPER($${i++})`;
+    params.push(filters.state);
+  }
   if (filters.lead_type) {
     clause += ` AND lead_type = $${i++}`;
     params.push(filters.lead_type);
@@ -209,6 +214,7 @@ export async function getLeadStats(): Promise<LeadStats> {
 
 export async function deleteLeadsByFilter(filter: {
   county?: string;
+  state?: string;
   source_url?: string;
   owner_name_contains?: string;
 }): Promise<number> {
@@ -219,6 +225,13 @@ export async function deleteLeadsByFilter(filter: {
   if (filter.county) {
     sql += ` AND LOWER(county) = LOWER($${i++})`;
     params.push(filter.county);
+  }
+  // County names repeat across states (Hamilton OH and Hamilton TN are both
+  // configured). Without narrowing by state, deleting one county's leads by name
+  // would silently delete the other's too — and this is a hard delete.
+  if (filter.state) {
+    sql += ` AND UPPER(state) = UPPER($${i++})`;
+    params.push(filter.state);
   }
   if (filter.source_url) {
     sql += ` AND source_url = $${i++}`;

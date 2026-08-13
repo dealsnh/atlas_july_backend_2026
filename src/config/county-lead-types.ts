@@ -62,6 +62,15 @@ export const COUNTY_DEFAULT_LEAD_TYPES: Record<string, readonly string[]> = {
   "MO:Cass": ["Probate", "Pre-Foreclosure", "Tax Delinquent", "Bankruptcy", "Sheriff Sale", "FSBO", "Out-of-State Owner", "Absentee Owner"],
   // ── Ohio (judicial; foreclosure filing = pre-foreclosure, sheriff sale = auction) ──
   "OH:Hamilton": ["Probate", "Pre-Foreclosure", "Code Violation", "Tax Delinquent", "Fire Damage", "Divorce", "Bankruptcy", "Vacant/Abandoned", "Sheriff Sale", "FSBO", "Out-of-State Owner", "Absentee Owner", "Long-Time Owner", "Senior Owner", "Obituary"],
+  // ── Tennessee (non-judicial deed-of-trust; substitute trustee's sale = pre-foreclosure) ──
+  // Hamilton (Chattanooga). Roll-backed via the Chattanooga parcel layer → Out-of-State /
+  // Absentee available. Sheriff Sale omitted: TN foreclosures are trustee's sales (already
+  // Pre-Foreclosure) and the only auction is the Clerk & Master's once-a-year tax sale, which
+  // is published as a May newspaper list, not a scrapeable recurring docket.
+  // Senior Owner omitted: no populated age/tax-relief field on the county roll.
+  // Eviction omitted: General Sessions detainer dockets (edockets.us) refuse datacenter IPs.
+  // Long-Time Owner omitted: derivable from roll sale dates but not wired as a scan yet.
+  "TN:Hamilton": ["Probate", "Pre-Foreclosure", "Code Violation", "Tax Delinquent", "Fire Damage", "Divorce", "Bankruptcy", "Vacant/Abandoned", "FSBO", "Out-of-State Owner", "Absentee Owner", "Obituary"],
   // ── Alabama (non-judicial; trustee sale ≈ pre-foreclosure) ──
   // Jefferson (Birmingham) has the only AL Code Violation + Vacant/Abandoned portals.
   "AL:Jefferson": ["Probate", "Pre-Foreclosure", "Code Violation", "Tax Delinquent", "Divorce", "Bankruptcy", "Vacant/Abandoned", "Sheriff Sale", "FSBO", "Obituary"],

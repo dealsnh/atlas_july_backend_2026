@@ -40,6 +40,8 @@ export interface Lead {
 
 export interface LeadFilters {
   county?: string;
+  /** Required to disambiguate same-named counties across states (Hamilton OH vs Hamilton TN). */
+  state?: string;
   lead_type?: string;
   status?: string;
   from_date?: string;

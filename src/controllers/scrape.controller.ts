@@ -53,6 +53,7 @@ export function triggerScrapeHandler(req: Request, res: Response): void {
     from_date?: string;
     to_date?: string;
     county?: string;
+    state?: string;
     lead_type?: string;
   };
   const fromDate = body.from_date || getDateRange(1).fromDate;
@@ -63,12 +64,16 @@ export function triggerScrapeHandler(req: Request, res: Response): void {
       ? normalizeLeadType(body.lead_type)
       : undefined;
   const county = typeof body.county === "string" && body.county.trim() ? body.county : undefined;
+  const state =
+    typeof body.state === "string" && body.state.trim() ? body.state.trim().toUpperCase() : undefined;
   const filter: ScrapeFilter | undefined =
-    leadType || county ? { county, leadTypes: leadType ? [leadType] : undefined } : undefined;
+    leadType || county
+      ? { county, state, leadTypes: leadType ? [leadType] : undefined }
+      : undefined;
 
   if (filter && buildCountyConfigs(filter).length === 0) {
     throw ApiError.badRequest(
-      `No configured scraper matches${county ? ` county "${county}"` : ""}${leadType ? ` lead type "${leadType}"` : ""}`,
+      `No configured scraper matches${county ? ` county "${county}"` : ""}${state ? ` in ${state}` : ""}${leadType ? ` lead type "${leadType}"` : ""}`,
     );
   }
 

@@ -4,6 +4,7 @@ import { Lead, CountyConfig } from "./base.js";
 import * as missouri from "./missouri.js";
 import * as alabama from "./alabama.js";
 import * as ohio from "./ohio.js";
+import * as tennessee from "./tennessee.js";
 import { scrapePublicSearchLeads } from "./publicsearch-leads.js";
 import { scrapeRollDerived } from "./roll-leads.js";
 
@@ -236,6 +237,11 @@ export async function runAllScrapers(
           leads = await alabama.scrapeAlabama(name, fromDate, toDate, types, errors);
         } else if (state === "OH") {
           leads = await ohio.scrapeOhio(name, fromDate, toDate, types, errors);
+        } else if (state === "TN") {
+          // TN has no state-wide scrapers: Hamilton's bankruptcy feed is filtered to
+          // the Chattanooga division inside the county dispatcher, so everything
+          // runs per-county here.
+          leads = await tennessee.scrapeTennessee(name, fromDate, toDate, types, errors);
         } else {
           const msg = `No scraper registered for ${name}, ${county.state}`;
           errors.push(msg);

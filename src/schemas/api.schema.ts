@@ -3,6 +3,9 @@ import { BOOLEAN_STRING, LEAD_STATUSES, LEAD_TYPES } from "../config/api-enums.j
 
 export const leadsQuerySchema = z.object({
   county: z.string().optional(),
+  // County names are not unique across states — the client tracks both Hamilton OH
+  // and Hamilton TN — so county alone would mix two counties' leads in one view.
+  state: z.string().length(2).optional(),
   lead_type: z.enum(LEAD_TYPES).optional(),
   status: z.enum(LEAD_STATUSES).optional(),
   from_date: z.string().optional(),
@@ -51,6 +54,8 @@ export const scrapeTriggerSchema = z.object({
   from_date: z.string().optional(),
   to_date: z.string().optional(),
   county: z.string().optional(),
+  /** Disambiguates a targeted scrape when the county name exists in two states. */
+  state: z.string().length(2).optional(),
   lead_type: z.string().optional(),
 });
 
@@ -61,6 +66,8 @@ export const historicalScrapeSchema = z.object({
 export const adminDeleteSchema = z
   .object({
     county: z.string().optional(),
+    /** Narrows a by-county delete to one state — Hamilton exists in both OH and TN. */
+    state: z.string().length(2).optional(),
     source_url: z.string().optional(),
     owner_name_contains: z.string().optional(),
   })

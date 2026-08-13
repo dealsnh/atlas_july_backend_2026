@@ -59,6 +59,20 @@ const FSBO_METROS: Record<string, string[]> = {
     "forest-park-ohio",
     "cheviot-ohio",
   ],
+  // Hamilton County TN (Chattanooga). Slugs verified 2026-08-13 — each returns
+  // listings whose address.county is "Hamilton" / state "TN". lookout-mountain-tennessee
+  // is omitted: the API has no listings for it.
+  "TN:Hamilton": [
+    "chattanooga-tennessee",
+    "hixson-tennessee",
+    "east-ridge-tennessee",
+    "signal-mountain-tennessee",
+    "red-bank-tennessee",
+    "ooltewah-tennessee",
+    "harrison-tennessee",
+    "soddy-daisy-tennessee",
+    "collegedale-tennessee",
+  ],
   "AL:Jefferson": [
     "birmingham-alabama",
     "hoover-alabama",

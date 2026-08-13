@@ -60,12 +60,23 @@ export async function getLastScrapeTimeValue(): Promise<string | null> {
 /** Optional targeting for a manual run: restrict to one county and/or specific lead types. */
 export interface ScrapeFilter {
   county?: string;
+  /**
+   * Narrows the county match to one state. Without it, targeting "Hamilton" runs
+   * BOTH Hamilton OH and Hamilton TN — two different counties that happen to share
+   * a name. Omitted means "every state that has this county name", which stays
+   * backwards-compatible for the unique names.
+   */
+  state?: string;
   leadTypes?: string[];
 }
 
 export function buildCountyConfigs(filter?: ScrapeFilter): CountyConfig[] {
   return clientConfig.counties
     .filter((county) => !filter?.county || (county.name || county.county) === filter.county)
+    .filter(
+      (county) =>
+        !filter?.state || county.state.toUpperCase() === filter.state.toUpperCase(),
+    )
     .map((county) => {
       const leadTypes = resolveCountyLeadTypes(county);
       return {
