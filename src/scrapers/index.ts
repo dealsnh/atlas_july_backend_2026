@@ -5,6 +5,7 @@ import * as missouri from "./missouri.js";
 import * as alabama from "./alabama.js";
 import * as ohio from "./ohio.js";
 import * as tennessee from "./tennessee.js";
+import * as california from "./california.js";
 import { scrapePublicSearchLeads } from "./publicsearch-leads.js";
 import { scrapeRollDerived } from "./roll-leads.js";
 
@@ -242,6 +243,10 @@ export async function runAllScrapers(
           // the Chattanooga division inside the county dispatcher, so everything
           // runs per-county here.
           leads = await tennessee.scrapeTennessee(name, fromDate, toDate, types, errors);
+        } else if (state === "CA") {
+          // California sources are county-scoped; Orange County currently has the
+          // verified Bankruptcy RSS + public parcel-roll completion path.
+          leads = await california.scrapeCalifornia(name, fromDate, toDate, types, errors);
         } else {
           const msg = `No scraper registered for ${name}, ${county.state}`;
           errors.push(msg);

@@ -75,6 +75,8 @@ interface RollSpec {
   situsDisplayField?: string;
   situsNumField?: string;
   situsStreetField?: string;
+  /** Optional street-name field when a roll separates directional prefix and name. */
+  situsStreetExtraField?: string;
   situsSuffixField?: string;
   situsCityField?: string;
   situsZipField?: string;
@@ -232,6 +234,31 @@ const ROLL_SPECS: Record<string, RollSpec> = {
     defaultCity: "Chattanooga",
     state: "TN",
   },
+  // Orange County CA — official County GIS joined parcel roll. It exposes owner,
+  // situs, mailing address, and APN without an account. The street is split into
+  // number + directional prefix + name + suffix, so avoid the combined display
+  // field, which also appends the city.
+  "orange-ca": {
+    urls: [
+      env(
+        "ORANGE_CA_PARCEL_QUERY_URL",
+        "https://www.ocgis.com/arcpub/rest/services/CEO_RealEstate/RealEstateOCParcels/MapServer/0/query",
+      ),
+    ],
+    ownerField: "OWNER_NAME",
+    situsNumField: "SITE_ADDR_",
+    situsStreetField: "SITE_STREE",
+    situsStreetExtraField: "SITE_STR_1",
+    situsSuffixField: "SITE_STR_2",
+    situsCityField: "SITE_CITY_",
+    situsZipField: "SITE_ZIP5",
+    mailFields: ["MAIL_ADDR_", "MAIL_PREFI", "MAIL_STREE", "MAIL_UNIT_", "MAIL_SUFFI"],
+    mailCityField: "MAIL_CITY_",
+    mailZipField: "MAIL_ZIP5",
+    parcelIdField: "ASSESSMENT",
+    defaultCity: "Santa Ana",
+    state: "CA",
+  },
 };
 
 function rollSpecKey(county: string, state: string): string {
@@ -263,6 +290,7 @@ function rollOutFields(spec: RollSpec): string {
     spec.situsDisplayField,
     spec.situsNumField,
     spec.situsStreetField,
+    spec.situsStreetExtraField,
     spec.situsSuffixField,
     spec.situsCityField,
     spec.situsZipField,
@@ -279,16 +307,21 @@ function buildSitus(attrs: Record<string, unknown>, spec: RollSpec): string {
   if (spec.situsDisplayField) {
     // Some display fields append the state and/or zip — strip it to a clean street line.
     const disp = s(attrs[spec.situsDisplayField])
-      .replace(/[,\s]+(MO|OH|AL)\s*(\d{5}(-\d{4})?)?\s*$/i, "")
+      .replace(/[,\s]+(MO|OH|AL|CA)\s*(\d{5}(-\d{4})?)?\s*$/i, "")
       .trim();
     if (disp && /^\d/.test(disp)) return disp;
   }
   const parts = [
     spec.situsNumField ? s(attrs[spec.situsNumField]) : "",
     spec.situsStreetField ? s(attrs[spec.situsStreetField]) : "",
+    spec.situsStreetExtraField ? s(attrs[spec.situsStreetExtraField]) : "",
     spec.situsSuffixField ? s(attrs[spec.situsSuffixField]) : "",
   ].filter(Boolean);
   return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function trimStateFromCity(value: string, state: string): string {
+  return value.replace(new RegExp(`[,\\s]+${state}\\s*$`, "i"), "").trim();
 }
 
 function mapRollFeature(attrs: Record<string, unknown>, spec: RollSpec): AssessorProperty | null {
@@ -303,13 +336,17 @@ function mapRollFeature(attrs: Record<string, unknown>, spec: RollSpec): Assesso
     .trim();
   return {
     address: situs,
-    city: (spec.situsCityField && s(attrs[spec.situsCityField])) || spec.defaultCity,
+    city: trimStateFromCity(
+      (spec.situsCityField && s(attrs[spec.situsCityField])) || spec.defaultCity,
+      spec.state,
+    ),
     state: spec.state,
     zip: (spec.situsZipField && s(attrs[spec.situsZipField]).slice(0, 5)) || undefined,
     parcelId: (spec.parcelIdField && s(attrs[spec.parcelIdField])) || undefined,
     ownerName: owner,
     mailingAddress: mailing || undefined,
-    mailingCity: (spec.mailCityField && s(attrs[spec.mailCityField])) || undefined,
+    mailingCity:
+      (spec.mailCityField && trimStateFromCity(s(attrs[spec.mailCityField]), spec.state)) || undefined,
     mailingState: (spec.mailStateField && s(attrs[spec.mailStateField])) || spec.state,
     mailingZip: (spec.mailZipField && s(attrs[spec.mailZipField]).slice(0, 5)) || undefined,
   };
@@ -355,12 +392,17 @@ async function rollLookupByAddress(
   streetRest: string,
 ): Promise<AssessorProperty | null> {
   const rest = streetRest.toUpperCase().replace(/'/g, "''").trim();
-  const firstTok = rest.split(/\s+/).filter(Boolean)[0] || rest;
+  const tokens = rest.split(/\s+/).filter(Boolean);
+  const firstTok =
+    tokens.find((token) => !/^(N|S|E|W|NE|NW|SE|SW|NORTH|SOUTH|EAST|WEST)$/i.test(token)) ||
+    tokens[0] ||
+    rest;
   if (!streetNum || !firstTok) return null;
 
+  const queryStreetField = spec.situsStreetExtraField || spec.situsStreetField;
   const where = spec.situsDisplayField
     ? `UPPER(${spec.situsDisplayField}) LIKE '${streetNum} %${firstTok}%'`
-    : `${spec.situsNumField}='${streetNum}' AND UPPER(${spec.situsStreetField}) LIKE '%${firstTok}%'`;
+    : `${spec.situsNumField}='${streetNum}' AND UPPER(${queryStreetField}) LIKE '%${firstTok}%'`;
 
   const results = await queryRoll(spec, where, 8);
   // Conservative: keep only rows whose situs starts with the same house number
