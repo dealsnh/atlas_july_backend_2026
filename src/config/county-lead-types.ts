@@ -71,6 +71,11 @@ export const COUNTY_DEFAULT_LEAD_TYPES: Record<string, readonly string[]> = {
   // Eviction omitted: General Sessions detainer dockets (edockets.us) refuse datacenter IPs.
   // Long-Time Owner omitted: derivable from roll sale dates but not wired as a scan yet.
   "TN:Hamilton": ["Probate", "Pre-Foreclosure", "Code Violation", "Tax Delinquent", "Fire Damage", "Divorce", "Bankruptcy", "Vacant/Abandoned", "FSBO", "Out-of-State Owner", "Absentee Owner", "Obituary"],
+  // ── California ──
+  // Orange County: Central District bankruptcy RSS plus countywide public parcel-roll
+  // completion. Other source categories remain deliberately unlisted until a lawful
+  // source contract and response signature are verified.
+  "CA:Orange": ["Bankruptcy"],
   // ── Alabama (non-judicial; trustee sale ≈ pre-foreclosure) ──
   // Jefferson (Birmingham) has the only AL Code Violation + Vacant/Abandoned portals.
   "AL:Jefferson": ["Probate", "Pre-Foreclosure", "Code Violation", "Tax Delinquent", "Divorce", "Bankruptcy", "Vacant/Abandoned", "Sheriff Sale", "FSBO", "Obituary"],
