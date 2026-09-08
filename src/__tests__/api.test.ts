@@ -21,6 +21,10 @@ describe("API routes", () => {
       address: "123 Test St",
       city: "Kansas City",
       zip: "64101",
+      mailing_address: "123 Test St",
+      mailing_city: "Kansas City",
+      mailing_state: "MO",
+      mailing_zip: "64101",
       filing_date: "2026-01-01",
       source_url: "https://example.com",
     });
