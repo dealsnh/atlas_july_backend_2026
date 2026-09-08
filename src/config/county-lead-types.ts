@@ -74,10 +74,13 @@ export const COUNTY_DEFAULT_LEAD_TYPES: Record<string, readonly string[]> = {
   // ── California ──
   // Orange County: Central District bankruptcy RSS, capublicnotice.com probate
   // notices (session-gated, county-filtered on the result's own `location`
-  // field), plus countywide public parcel-roll completion. Other source
+  // field), the roll-derived "still on the tax roll as an estate" scan
+  // (labeled Pre-Probate here, not Probate — CA already has a real
+  // court-filed Probate above, so the roll signal is the earlier, weaker
+  // stage), plus countywide public parcel-roll completion. Other source
   // categories remain deliberately unlisted until a lawful source contract
   // and response signature are verified.
-  "CA:Orange": ["Probate", "Bankruptcy"],
+  "CA:Orange": ["Probate", "Pre-Probate", "Bankruptcy"],
   // ── Alabama (non-judicial; trustee sale ≈ pre-foreclosure) ──
   // Jefferson (Birmingham) has the only AL Code Violation + Vacant/Abandoned portals.
   "AL:Jefferson": ["Probate", "Pre-Foreclosure", "Code Violation", "Tax Delinquent", "Divorce", "Bankruptcy", "Vacant/Abandoned", "Sheriff Sale", "FSBO", "Obituary"],

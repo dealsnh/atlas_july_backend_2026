@@ -68,9 +68,10 @@ const orangeParcelFeature = {
 };
 
 describe("Orange County California scraping configuration", () => {
-  it("enables only the verified Bankruptcy and Probate lead types", () => {
+  it("enables only the verified Bankruptcy, Probate, and Pre-Probate lead types", () => {
     expect(resolveCountyLeadTypes({ county: "Orange", name: "Orange", state: "CA" })).toEqual([
       "Probate",
+      "Pre-Probate",
       "Bankruptcy",
     ]);
   });

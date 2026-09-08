@@ -66,6 +66,7 @@ export const ROLL_DERIVED_TYPES = [
   "Out-of-State Owner",
   "Absentee Owner",
   "Probate",
+  "Pre-Probate",
   "Long-Time Owner",
   "Senior Owner",
 ] as const;
@@ -74,6 +75,19 @@ const isJacksonMO = (county: string, state: string) =>
   state.toUpperCase() === "MO" && /jackson/i.test(county);
 const isHamiltonOH = (county: string, state: string) =>
   state.toUpperCase() === "OH" && /hamilton/i.test(county);
+
+/**
+ * California already runs a real, court-filed "Probate" scraper
+ * (capublicnotice.com — see california.ts). There, this roll scan's "still on
+ * the tax roll under the deceased's/estate's name" signal is an EARLIER,
+ * weaker stage — no formal case may be filed yet — so it's labeled
+ * "Pre-Probate" instead, distinct from the real court filing. Every other
+ * state's roll-estate scan is already treated as full Probate (documented in
+ * county-lead-types.ts) and is unchanged.
+ */
+function estateLeadType(state: string): string {
+  return state.toUpperCase() === "CA" ? "Pre-Probate" : "Probate";
+}
 
 // Hamilton OH parcel roll carries native distress fields no other roll here has.
 const HAMILTON_ROLL_WHERE: Record<string, { where: string; note: string }> = {
@@ -119,10 +133,11 @@ export async function scrapeRollDerived(
     );
   }
 
-  if (want("Probate")) {
+  const estateType = estateLeadType(state);
+  if (want(estateType)) {
     const props = jackson ? await scanJacksonEstate(200) : await scanEstateOwners(county, state, 200);
     leads.push(
-      ...props.map((p) => propToLead(p, county, state, "Probate", "owner of record is an estate/heirs")),
+      ...props.map((p) => propToLead(p, county, state, estateType, "owner of record is an estate/heirs")),
     );
   }
 
