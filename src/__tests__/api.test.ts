@@ -1,8 +1,9 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { closeDb, initDb, resetDbForTests } from "../db/connection.js";
 import { createApp } from "../app.js";
 import { insertLeadIfNotExists } from "../repositories/leads.repository.js";
+import { env } from "../config/env.js";
 
 describe("API routes", () => {
   const app = createApp();
@@ -82,6 +83,41 @@ describe("API routes", () => {
       const res = await request(app).get("/api/v1/unknown-route");
       expect(res.status).toBe(404);
       expect(res.body.success).toBe(false);
+    });
+  });
+
+  describe("leads endpoint auth enforcement", () => {
+    const testApiKey = "test-leads-auth-key";
+
+    afterEach(() => {
+      env.API_KEY = undefined;
+    });
+
+    it("GET /api/v1/leads rejects a request with no credentials once an API key is configured", async () => {
+      env.API_KEY = testApiKey;
+      const res = await request(app).get("/api/v1/leads");
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+    });
+
+    it("GET /api/v1/leads accepts the configured x-api-key", async () => {
+      env.API_KEY = testApiKey;
+      const res = await request(app).get("/api/v1/leads").set("x-api-key", testApiKey);
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+    });
+
+    it("GET /api/v1/leads/export rejects a request with no credentials once an API key is configured", async () => {
+      env.API_KEY = testApiKey;
+      const res = await request(app).get("/api/v1/leads/export");
+      expect(res.status).toBe(401);
+    });
+
+    it("GET /api/v1/leads/export accepts the configured x-api-key", async () => {
+      env.API_KEY = testApiKey;
+      const res = await request(app).get("/api/v1/leads/export").set("x-api-key", testApiKey);
+      expect(res.status).toBe(200);
+      expect(res.headers["content-type"]).toContain("text/csv");
     });
   });
 

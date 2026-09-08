@@ -16,8 +16,18 @@ import { asyncHandler } from "../../../utils/async-handler.js";
 
 const router: IRouter = Router();
 
-router.get("/", validate(leadsQuerySchema, "query"), asyncHandler(listLeadsHandler));
-router.get("/export", validate(leadsQuerySchema, "query"), asyncHandler(exportLeadsHandler));
+router.get(
+  "/",
+  asyncHandler(authMiddleware),
+  validate(leadsQuerySchema, "query"),
+  asyncHandler(listLeadsHandler),
+);
+router.get(
+  "/export",
+  asyncHandler(authMiddleware),
+  validate(leadsQuerySchema, "query"),
+  asyncHandler(exportLeadsHandler),
+);
 router.patch(
   "/:id",
   asyncHandler(authMiddleware),
