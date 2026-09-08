@@ -10,7 +10,15 @@
  * verified. This module must never report a blocked source as an empty run.
  */
 
-import { Lead, fetchWithRetry, formatDate, makeId, settleScraperResults } from "./base.js";
+import {
+  Lead,
+  fetchWithRetry,
+  formatDate,
+  makeId,
+  settleScraperResults,
+  toUsDate,
+  validateHtmlResponse,
+} from "./base.js";
 import { isGovernmentOwner, lookupOwnerProperties } from "./assessor.js";
 import { logger } from "../utils/logger.js";
 
@@ -18,6 +26,7 @@ const COUNTY = "Orange";
 const STATE = "CA";
 const CACB_RSS = "https://ecf.cacb.uscourts.gov/cgi-bin/rss_outside.pl";
 const NAME_LOOKUP_CONCURRENCY = 4;
+const CAPUBLICNOTICE_BASE = "https://www.capublicnotice.com";
 
 export interface CaliforniaBankruptcyItem {
   caseNumber: string;
@@ -219,6 +228,206 @@ export async function scrapeBankruptcy(fromDate: string, toDate: string): Promis
   return leads;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Probate — www.capublicnotice.com (the SINGULAR domain; the plural
+// capublicnotices.com measured at ~1.4% OC yield and is not used).
+//
+// Every result row carries a structural `location` field set to the county
+// name by the publisher's own newspaper assignment — this is the OC filter,
+// not a text guess (a bare city-name or newspaper-name match is unreliable:
+// city names also appear as attorney addresses or incidental text). The
+// search is SESSION-GATED: a cold request with no prior page load on this
+// host returns zero rows no matter how correct the query parameters are, so
+// every pull first loads the landing page to pick up a session cookie.
+// `page` does not paginate correctly here — request one oversized `size`
+// instead (verified: size=9000 returns a full 12-month OC-and-statewide feed
+// in one request, no partitioning needed the way the Recorder site needs).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CaliforniaProbateItem {
+  caseNumber: string;
+  decedentName: string;
+  publisher: string;
+  postDate: string | null;
+  sourceUrl: string;
+  snippet: string;
+}
+
+const PROBATE_INCLUDE_RE =
+  /NOTICE OF PETITION TO ADMINISTER ESTATE|LETTERS TESTAMENTARY|NOTICE TO CREDITORS/i;
+const PROBATE_EXCLUDE_RE =
+  /TRUSTEE('|’)S SALE|NOTICE OF DEFAULT|SHERIFF('|’)S SALE|LIEN SALE|CHANGE OF NAME|DISSOLUTION OF MARRIAGE|SUMMONS/i;
+
+function decodeCaPublicNoticeEntities(value: string): string {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function mergeCaPublicNoticeCookies(res: Response): string {
+  const getSetCookie = (res.headers as { getSetCookie?: () => string[] }).getSetCookie;
+  const raw =
+    typeof getSetCookie === "function"
+      ? getSetCookie.call(res.headers)
+      : res.headers.get("set-cookie")?.split(", ") || [];
+  return raw.map((c) => c.split(";")[0]).join("; ");
+}
+
+/** Loads the landing page to establish the session cookie a cold search request lacks. */
+async function warmCaPublicNoticeSession(): Promise<string> {
+  try {
+    const res = await fetchWithRetry(`${CAPUBLICNOTICE_BASE}/`);
+    return mergeCaPublicNoticeCookies(res);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Parses the search-results page into probate notices. Each result renders as a
+ * repeating `data-uuid="Notices_<id>"` block; only the `<div class="location">`
+ * value confirms Orange County. Descriptions are truncated to ~200 chars in the
+ * list view, so the decedent name + case number must both be readable within
+ * that snippet — verified live: OC's own boilerplate opening
+ * ("NOTICE OF PETITION TO ADMINISTER ESTATE OF: NAME CASE# ...") always puts
+ * both before the truncation point.
+ */
+export function parseCaPublicNoticeProbate(html: string): CaliforniaProbateItem[] {
+  const blocks = html.split('data-bs-target="#ajax_preview" data-uuid="Notices_').slice(1);
+  const out = new Map<string, CaliforniaProbateItem>();
+
+  for (const block of blocks) {
+    const chunk = block.slice(0, 6000);
+
+    const locationMatch = chunk.match(/<div class="location">([^<]*)<\/div>/);
+    if (!/^orange$/i.test((locationMatch?.[1] || "").trim())) continue;
+
+    const descMatch = chunk.match(/<span class="description[^"]*">([\s\S]*?)<\/span>/);
+    const snippet = decodeCaPublicNoticeEntities((descMatch?.[1] || "").replace(/<[^>]+>/g, " "));
+    if (!snippet || !PROBATE_INCLUDE_RE.test(snippet) || PROBATE_EXCLUDE_RE.test(snippet)) continue;
+
+    const caseMatch =
+      snippet.match(/CASE\s*#\s*[:.]?\s*([0-9]{2}-[0-9]{4}-[0-9]+-PR-[A-Z]{2,4}(?:-[A-Z]+)?)/i) ||
+      snippet.match(/CASE\s*#\s*[:.]?\s*([A-Z0-9-]{5,40})/i) ||
+      snippet.match(/CASE\s*NO\.?\s*([A-Z0-9-]{5,40})/i);
+    const caseNumber = (caseMatch?.[1] || "").trim();
+    if (!caseNumber) continue;
+
+    const nameMatch = snippet.match(
+      /ESTATE OF:?\s*([A-Za-z][A-Za-z .,'-]{2,80}?)\s*(?:CASE\s*#|CASE\s*NO\.?|To all heirs)/i,
+    );
+    const decedentName = (nameMatch?.[1] || "").replace(/[.,]+$/, "").trim();
+    if (!decedentName || decedentName.length < 4) continue;
+
+    const publisherMatch = chunk.match(/<h4>([^<]*)<\/h4>/);
+    const publisher = decodeCaPublicNoticeEntities(publisherMatch?.[1] || "");
+
+    // The datetime attribute ("2026-09-08 00:00:00.0") carries no timezone marker,
+    // so a generic Date-parse-then-toISOString round trip (formatDate) reads it as
+    // local time and can shift it a day when converting to UTC. It's already
+    // YYYY-MM-DD — slice instead of parsing through Date at all.
+    const timeMatch = chunk.match(/<time datetime="(\d{4}-\d{2}-\d{2})/);
+    const postDate = timeMatch ? timeMatch[1] : null;
+
+    const idMatch = block.match(/^(\d+)/);
+    const sourceUrl = idMatch
+      ? `${CAPUBLICNOTICE_BASE}/advert/-Notices_${idMatch[1]}`
+      : CAPUBLICNOTICE_BASE;
+
+    // Notices republish weekly under a fresh advert id — dedupe on the case number,
+    // not the id, so one estate collapses to one candidate per pull.
+    if (!out.has(caseNumber)) {
+      out.set(caseNumber, {
+        caseNumber,
+        decedentName,
+        publisher,
+        postDate,
+        sourceUrl,
+        snippet: snippet.slice(0, 500),
+      });
+    }
+  }
+
+  return [...out.values()];
+}
+
+export async function scrapeCaliforniaProbate(fromDate: string, toDate: string): Promise<Lead[]> {
+  const cookie = await warmCaPublicNoticeSession();
+  const url =
+    `${CAPUBLICNOTICE_BASE}/search/query?` +
+    `firstDate=${toUsDate(fromDate)}&lastDate=${toUsDate(toDate)}&size=9000&page=0`;
+  const res = await fetchWithRetry(url, cookie ? { headers: { Cookie: cookie } } : {});
+  if (!res.ok) throw new Error(`Orange CA Probate capublicnotice.com HTTP ${res.status}`);
+
+  const html = await res.text();
+  const validated = validateHtmlResponse(html, "Orange CA Probate capublicnotice.com", 1000);
+  if (!validated.ok) {
+    throw new Error(validated.reason || "Orange CA Probate capublicnotice.com returned an invalid response");
+  }
+
+  const items = parseCaPublicNoticeProbate(html);
+  const leads: Lead[] = [];
+
+  for (let i = 0; i < items.length; i += NAME_LOOKUP_CONCURRENCY) {
+    const batch = items.slice(i, i + NAME_LOOKUP_CONCURRENCY);
+    const propertyResults = await Promise.all(
+      batch.map((item) => lookupOwnerProperties(item.decedentName, COUNTY, STATE).catch(() => [])),
+    );
+
+    for (let j = 0; j < batch.length; j++) {
+      const item = batch[j];
+      const properties = propertyResults[j] || [];
+      if (!item) continue;
+
+      for (const property of properties) {
+        if (!property.address || !property.mailingAddress || isGovernmentOwner(property.ownerName))
+          continue;
+        if (!personMatchesOwner(item.decedentName, property.ownerName)) continue;
+
+        const id = makeId(COUNTY, STATE, "Probate", `${item.caseNumber}-${property.address}`);
+        leads.push({
+          id,
+          county: COUNTY,
+          state: STATE,
+          lead_type: "Probate",
+          owner_name: property.ownerName || item.decedentName,
+          address: property.address,
+          city: property.city || null,
+          zip: property.zip || null,
+          mailing_address: property.mailingAddress,
+          mailing_city: property.mailingCity || null,
+          mailing_state: property.mailingState || null,
+          mailing_zip: property.mailingZip || null,
+          case_number: item.caseNumber,
+          filing_date: item.postDate,
+          assessed_value: null,
+          tax_year: null,
+          lender: null,
+          loan_amount: null,
+          sale_date: null,
+          sale_amount: null,
+          description: `Orange County CA Probate — Estate of ${item.decedentName} (${item.caseNumber}) — published ${item.publisher || "unknown paper"}`,
+          source_url: item.sourceUrl,
+          raw_data: JSON.stringify({
+            caseNumber: item.caseNumber,
+            decedentName: item.decedentName,
+            publisher: item.publisher,
+            postDate: item.postDate,
+            snippet: item.snippet,
+          }),
+        });
+      }
+    }
+  }
+
+  return leads;
+}
+
 export async function scrapeCalifornia(
   county: string,
   fromDate: string,
@@ -233,6 +442,7 @@ export async function scrapeCalifornia(
 
   const runners: Record<string, () => Promise<Lead[]>> = {
     Bankruptcy: () => scrapeBankruptcy(fromDate, toDate),
+    Probate: () => scrapeCaliforniaProbate(fromDate, toDate),
   };
   const types = leadTypes?.length ? leadTypes : Object.keys(runners);
   const entries = types
