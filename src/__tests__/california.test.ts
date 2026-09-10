@@ -1,11 +1,16 @@
+import { spawnSync } from "child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveCountyLeadTypes } from "../config/county-lead-types.js";
 import { lookupByAddress, lookupOwnerProperties } from "../scrapers/assessor.js";
 import {
   parseCaliforniaBankruptcyRss,
   parseCaPublicNoticeProbate,
+  parseRecorderResultRows,
+  scrapeCaliforniaForeclosure,
   scrapeCaliforniaProbate,
 } from "../scrapers/california.js";
+
+vi.mock("child_process", () => ({ spawnSync: vi.fn() }));
 
 // Trimmed from a real, live-fetched www.capublicnotice.com search-results page
 // (2026-09-08 pull). Field shapes (the `location` div, the truncated ~200-char
@@ -67,9 +72,48 @@ const orangeParcelFeature = {
   ],
 };
 
+// Trimmed from a real, live-fetched cr.occlerkrecorder.gov RecorderWorks search
+// response (2026-09-10 pull, Document Type 210 "NT TRUSTEE SALE"). Field shapes
+// (docNumber span, single-quoted GrtContainer/p tags, recDate/numOfPages cells,
+// the repeated non-unique row id) are copied verbatim from real rows; only the
+// checkbox/table boilerplate between fields is trimmed for length.
+const RECORDER_HTML = `<html><body><table>
+<tr id="row1" class="searchResultRow">
+  <td id="EntityTitleDocNum_docLinkTD"><span id="EntityTitleDocNum_docNumber" class="enableHighlight">2026000249658</span></td>
+  <td id="docTypeGrtGrtee"><div class='docTypeGrtGrteeContainer'><div class='GrtContainer' style='padding-left: 25px;'><p class='enableHighlight' >KASHFOLAYAT ALI</p><p class='enableHighlight' >ROHANI NAZANIN ZAMANIAN</p><p class='enableHighlight' >PEAK FORECLOSURE SERVICES INC TR</p></div></div></td>
+  <td id="recDate" class="enableHighlight">9/3/2026</td>
+  <td id="numOfPages">3</td>
+</tr>
+<tr id="row1" class="searchResultRow">
+  <td id="EntityTitleDocNum_docLinkTD"><span id="EntityTitleDocNum_docNumber" class="enableHighlight">2026000248010</span></td>
+  <td id="docTypeGrtGrtee"><div class='docTypeGrtGrteeContainer'><div class='GrtContainer' style='padding-left: 25px;'><p class='enableHighlight' >DIG COAST INN LLC</p><p class='enableHighlight' >FIDELITY NATIONAL TITLE COMPANY TR</p><p class='enableHighlight' >DIG COAST LIQUOR LLC</p></div></div></td>
+  <td id="recDate" class="enableHighlight">9/2/2026</td>
+  <td id="numOfPages">6</td>
+</tr>
+<tr id="row1" class="searchResultRow">
+  <td id="EntityTitleDocNum_docLinkTD"><span id="EntityTitleDocNum_docNumber" class="enableHighlight">2026000248493</span></td>
+  <td id="docTypeGrtGrtee"><div class='docTypeGrtGrteeContainer'><div class='GrtContainer' style='padding-left: 25px;'><p class='enableHighlight' >CLEAR RECON CORP TR</p><p class='enableHighlight' >ROBERTSON CHRISTOPHER L</p></div></div></td>
+  <td id="recDate" class="enableHighlight">9/2/2026</td>
+  <td id="numOfPages">2</td>
+</tr>
+<tr id="row1" class="searchResultRow">
+  <td id="EntityTitleDocNum_docLinkTD"><span id="EntityTitleDocNum_docNumber" class="enableHighlight">2026000248569</span></td>
+  <td id="docTypeGrtGrtee"><div class='docTypeGrtGrteeContainer'><div class='GrtContainer' style='padding-left: 25px;'><p class='enableHighlight' >PEREIRA JEFFREY J</p></div></div></td>
+  <td id="recDate" class="enableHighlight">9/2/2026</td>
+  <td id="numOfPages">5</td>
+</tr>
+<tr id="row1" class="searchResultRow">
+  <td id="EntityTitleDocNum_docLinkTD"><span id="EntityTitleDocNum_docNumber" class="enableHighlight">2026000248570</span></td>
+  <td id="docTypeGrtGrtee"><div class='docTypeGrtGrteeContainer'><div class='GrtContainer' style='padding-left: 25px;'><p class='enableHighlight' >WONG CHING WUN GRACE</p><p class='enableHighlight' >ROBERTSON ANSCHUTZ SCHNEID & CRANE LLP</p></div></div></td>
+  <td id="recDate" class="enableHighlight">9/2/2026</td>
+  <td id="numOfPages">7</td>
+</tr>
+</table></body></html>`;
+
 describe("Orange County California scraping configuration", () => {
-  it("enables only the verified Bankruptcy, Probate, and Pre-Probate lead types", () => {
+  it("enables only the verified Bankruptcy, Probate, Pre-Probate, and Foreclosure lead types", () => {
     expect(resolveCountyLeadTypes({ county: "Orange", name: "Orange", state: "CA" })).toEqual([
+      "Foreclosure",
       "Probate",
       "Pre-Probate",
       "Bankruptcy",
@@ -195,5 +239,102 @@ describe("Orange County California scraping configuration", () => {
       case_number: "30-2026-01593650-PR-PW-CMC",
       filing_date: "2026-09-08",
     });
+  });
+
+  it("parses each real Recorder result row into a doc number, grantors, date, and page count", () => {
+    const parsed = parseRecorderResultRows(RECORDER_HTML);
+
+    expect(parsed).toHaveLength(5);
+    expect(parsed[0]).toMatchObject({
+      docNumber: "2026000249658",
+      recordingDate: "2026-09-03",
+      grantors: ["KASHFOLAYAT ALI", "ROHANI NAZANIN ZAMANIAN", "PEAK FORECLOSURE SERVICES INC TR"],
+      numPages: "3",
+    });
+    expect(parsed[3]).toMatchObject({
+      docNumber: "2026000248569",
+      grantors: ["PEREIRA JEFFREY J"],
+    });
+  });
+
+  it("scrapes a foreclosure lead end to end via the GET+POST session pattern, no browser or JS needed", async () => {
+    process.env.BRIGHT_DATA_USER = "test-user";
+    process.env.BRIGHT_DATA_PASS = "test-pass";
+
+    vi.mocked(spawnSync).mockImplementation((_cmd, args) => {
+      const isPost = ((args as string[]) || []).includes("POST");
+      return { stdout: isPost ? RECORDER_HTML : "<html>session established</html>" } as never;
+    });
+
+    const pereiraParcel = {
+      features: [
+        {
+          attributes: {
+            OWNER_NAME: "PEREIRA JEFFREY J",
+            SITE_ADDR_: "10",
+            SITE_STREE: "",
+            SITE_STR_1: "OAK",
+            SITE_STR_2: "ST",
+            SITE_CITY_: "IRVINE CA",
+            SITE_ZIP5: "92620",
+            ASSESSMENT: "999-000-01",
+            MAIL_ADDR_: "10",
+            MAIL_PREFI: "",
+            MAIL_STREE: "OAK",
+            MAIL_UNIT_: "",
+            MAIL_SUFFI: "ST",
+            MAIL_CITY_: "IRVINE CA",
+            MAIL_ZIP5: "92620",
+          },
+        },
+      ],
+    };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify(pereiraParcel), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const leads = await scrapeCaliforniaForeclosure("2026-08-25", "2026-09-03");
+
+      // Only PEREIRA JEFFREY J's own name (from the single-grantor row) actually
+      // matches the mocked roll response — every trustee/entity name is filtered
+      // out, and the other individual names correctly find no matching owner.
+      expect(leads).toHaveLength(1);
+      expect(leads[0]).toMatchObject({
+        county: "Orange",
+        state: "CA",
+        lead_type: "Foreclosure",
+        owner_name: "PEREIRA JEFFREY J",
+        address: "10 OAK ST",
+        case_number: "2026000248569",
+        filing_date: "2026-09-02",
+      });
+    } finally {
+      delete process.env.BRIGHT_DATA_USER;
+      delete process.env.BRIGHT_DATA_PASS;
+    }
+  });
+
+  it("throws instead of reporting an empty run when the session cookie is rejected", async () => {
+    process.env.BRIGHT_DATA_USER = "test-user";
+    process.env.BRIGHT_DATA_PASS = "test-pass";
+    vi.mocked(spawnSync).mockImplementation((_cmd, args) => {
+      const isPost = ((args as string[]) || []).includes("POST");
+      return { stdout: isPost ? "Sorry, your session has expired. EndMessage:" : "<html>ok</html>" } as never;
+    });
+
+    try {
+      await expect(scrapeCaliforniaForeclosure("2026-08-25", "2026-09-03")).rejects.toThrow(
+        /session cookie was rejected/i,
+      );
+    } finally {
+      delete process.env.BRIGHT_DATA_USER;
+      delete process.env.BRIGHT_DATA_PASS;
+    }
   });
 });

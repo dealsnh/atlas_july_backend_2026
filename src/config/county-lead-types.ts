@@ -72,15 +72,20 @@ export const COUNTY_DEFAULT_LEAD_TYPES: Record<string, readonly string[]> = {
   // Long-Time Owner omitted: derivable from roll sale dates but not wired as a scan yet.
   "TN:Hamilton": ["Probate", "Pre-Foreclosure", "Code Violation", "Tax Delinquent", "Fire Damage", "Divorce", "Bankruptcy", "Vacant/Abandoned", "FSBO", "Out-of-State Owner", "Absentee Owner", "Obituary"],
   // ── California ──
-  // Orange County: Central District bankruptcy RSS, capublicnotice.com probate
+  // Orange County, in the client's stated priority order (Foreclosure, Probate,
+  // Pre-Probate, Tax Delinquent, Bankruptcy — Tax Delinquent not yet built):
+  // the OC Clerk-Recorder's Document Type search for trustee-sale filings
+  // (session-gated but needs no browser — a plain GET+POST pair reusing an
+  // ASP.NET session cookie, verified live), capublicnotice.com probate
   // notices (session-gated, county-filtered on the result's own `location`
   // field), the roll-derived "still on the tax roll as an estate" scan
   // (labeled Pre-Probate here, not Probate — CA already has a real
   // court-filed Probate above, so the roll signal is the earlier, weaker
-  // stage), plus countywide public parcel-roll completion. Other source
-  // categories remain deliberately unlisted until a lawful source contract
-  // and response signature are verified.
-  "CA:Orange": ["Probate", "Pre-Probate", "Bankruptcy"],
+  // stage), and Central District bankruptcy RSS — all completed against the
+  // countywide public parcel roll. Other source categories remain
+  // deliberately unlisted until a lawful source contract and response
+  // signature are verified.
+  "CA:Orange": ["Foreclosure", "Probate", "Pre-Probate", "Bankruptcy"],
   // ── Alabama (non-judicial; trustee sale ≈ pre-foreclosure) ──
   // Jefferson (Birmingham) has the only AL Code Violation + Vacant/Abandoned portals.
   "AL:Jefferson": ["Probate", "Pre-Foreclosure", "Code Violation", "Tax Delinquent", "Divorce", "Bankruptcy", "Vacant/Abandoned", "Sheriff Sale", "FSBO", "Obituary"],

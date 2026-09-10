@@ -1,17 +1,26 @@
 /**
  * California County Scrapers — Orange County.
  *
- * Initial verified source map:
+ * Verified source map:
  *   Bankruptcy — U.S. Bankruptcy Court, Central District of California public RSS,
  *     then conservative debtor-name → Orange County parcel-roll completion.
+ *   Probate — capublicnotice.com (singular domain), session-gated search,
+ *     county-confirmed on the result's own `location` field.
+ *   Foreclosure — OC Clerk-Recorder RecorderWorks Document Type search (code 210,
+ *     "NT TRUSTEE SALE"). Session-gated the same way as Probate but requires NO
+ *     JavaScript at all: a plain GET picks up an ASP.NET session cookie, then a
+ *     plain POST to the AJAX endpoint reusing that cookie returns real result
+ *     rows — verified live. A cookie-less POST alone returns "your session has
+ *     expired," so the GET must always run first.
  *
- * Recorder, court, tax-sale, and listing integrations remain intentionally absent
- * until each source's public interface and production response signature are
- * verified. This module must never report a blocked source as an empty run.
+ * Tax-sale and listing integrations remain intentionally absent until each
+ * source's public interface and production response signature are verified.
+ * This module must never report a blocked source as an empty run.
  */
 
 import {
   Lead,
+  fetchViaBrightDataWithSession,
   fetchWithRetry,
   formatDate,
   makeId,
@@ -332,7 +341,7 @@ export function parseCaPublicNoticeProbate(html: string): CaliforniaProbateItem[
     // local time and can shift it a day when converting to UTC. It's already
     // YYYY-MM-DD — slice instead of parsing through Date at all.
     const timeMatch = chunk.match(/<time datetime="(\d{4}-\d{2}-\d{2})/);
-    const postDate = timeMatch ? timeMatch[1] : null;
+    const postDate = timeMatch?.[1] ?? null;
 
     const idMatch = block.match(/^(\d+)/);
     const sourceUrl = idMatch
@@ -428,6 +437,319 @@ export async function scrapeCaliforniaProbate(fromDate: string, toDate: string):
   return leads;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Foreclosure — OC Clerk-Recorder RecorderWorks, Document Type search
+// (code 210, "NT TRUSTEE SALE"). CA forecloses nonjudicially through the
+// Recorder, never a court docket, so this is the only source for it.
+//
+// SESSION-GATED, but needs NO browser/JS at all: a plain GET on the site's
+// root establishes an ASP.NET session cookie, then a plain POST to the AJAX
+// endpoint reusing that cookie returns real rows. Verified live: a cookie-less
+// POST alone returns the literal text "your session has expired."
+//
+// Each row carries a Grantor block mixing the sale trustee company with the
+// actual owner name, same field, no role marker — split on entity keywords,
+// not a bare "TR" suffix (an individual can legitimately hold title via their
+// own personal living trust, e.g. "RICHARDS JAMES ROBERT TR" is a real
+// homeowner). Grantor names are indexed "LAST FIRST [MIDDLE]" — the OPPOSITE
+// order from a notice body — confirmed live.
+//
+// KNOWN CAP: the site truncates any single query at 367 results, newest
+// first, so a range wider than ~1 month can silently drop the OLDER end.
+// This scraper does not yet partition wide ranges by month — safe for the
+// normal daily/weekly incremental window, not yet safe for a multi-month
+// historical backfill.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const RECORDER_BASE = "https://cr.occlerkrecorder.gov/RecorderWorksInternet/";
+const RECORDER_AJAX = `${RECORDER_BASE}Presentors/AjaxPresentor.aspx`;
+const RECORDER_PAGE_SIZE = 20;
+const RECORDER_MAX_PAGES = 20; // 400 rows of headroom over the real 367 cap
+
+export interface CaliforniaForeclosureItem {
+  docNumber: string;
+  recordingDate: string | null;
+  grantors: string[];
+  numPages: string | null;
+}
+
+/**
+ * Parses the Recorder's M/D/YYYY date text straight to YYYY-MM-DD, with no
+ * Date object involved at any point. `formatDate()` round-trips through
+ * `new Date(...).toISOString()`, which reads the string as LOCAL midnight
+ * and can roll the date back a day once converted to UTC — confirmed live
+ * on this machine (local timezone runs ahead of UTC). Same class of bug the
+ * Probate parser above already had to route around for its own date field.
+ */
+function parseRecorderDate(value: string): string | null {
+  const match = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return null;
+  const [, m, d, y] = match;
+  return `${y}-${(m || "").padStart(2, "0")}-${(d || "").padStart(2, "0")}`;
+}
+
+const FORECLOSURE_ENTITY_MARKERS = new Set([
+  "LLC",
+  "INC",
+  "CORP",
+  "CORPORATION",
+  "CORPS",
+  "COMPANY",
+  "LLP",
+  "LP",
+  "CO",
+  "SERVICES",
+  "SOLUTIONS",
+  "SPECIALISTS",
+  "RECOVERY",
+  "RECONVEYANCE",
+  "DEFAULT",
+  "TITLE",
+  "INSURANCE",
+  "LENDER",
+  "LENDERS",
+  "LENDING",
+  "MANAGEMENT",
+  "ADVISORS",
+  "FORECLOSURE",
+  "BANK",
+  "NATIONAL",
+  "MORTGAGE",
+  "FINANCIAL",
+  "CAPITAL",
+  "FUND",
+  "ASSOCIATION",
+  "AGENCY",
+  "GROUP",
+  "HOLDINGS",
+  "INVESTMENT",
+  "SERVICING",
+  "TRUSTEE",
+  "ATTORNEY",
+  "LEGAL",
+  "LAW",
+  "REAL",
+  "ESTATE",
+  "SYSTEMS",
+  "PARTNERS",
+  "PROGRESSIVE",
+  "WESTERN",
+  "NATIONWIDE",
+  "WORLDWIDE",
+]);
+const FORECLOSURE_SUFFIX_DROP = new Set(["TR", "TRUSTEE"]);
+
+function isForeclosureEntityName(name: string): boolean {
+  if (name.includes("&")) return true;
+  const tokens = name.toUpperCase().match(/[A-Z']+/g) || [];
+  return tokens.some((t) => FORECLOSURE_ENTITY_MARKERS.has(t));
+}
+
+/**
+ * Splits raw Grantor names into individual owner candidates vs. entity/trustee
+ * names, reordering an individual name from the source's own "LAST FIRST
+ * [MIDDLE]" convention to "FIRST LAST" for the county roll lookup. A lone
+ * trailing TR/TRUSTEE token is dropped first (a personal living trust marker,
+ * not the sale trustee) before reordering.
+ */
+function splitForeclosureGrantors(grantors: string[]): { owners: string[]; entities: string[] } {
+  const owners: string[] = [];
+  const entities: string[] = [];
+
+  for (const raw of grantors) {
+    const g = (raw || "").trim();
+    if (!g) continue;
+    if (isForeclosureEntityName(g)) {
+      entities.push(g);
+      continue;
+    }
+
+    let tokens = g.split(/\s+/).filter(Boolean);
+    const lastToken = tokens[tokens.length - 1]?.toUpperCase().replace(/\.$/, "");
+    if (tokens.length > 1 && lastToken && FORECLOSURE_SUFFIX_DROP.has(lastToken)) {
+      tokens = tokens.slice(0, -1);
+    }
+    if (tokens.length < 2) continue;
+
+    owners.push(`${tokens[1]} ${tokens[0]}`);
+  }
+
+  return { owners, entities };
+}
+
+/** Parses one search-results page (or one OnPage response) into raw rows. */
+export function parseRecorderResultRows(html: string): CaliforniaForeclosureItem[] {
+  const rows = html.split(/class=["']searchResultRow["']/).slice(1);
+  const out: CaliforniaForeclosureItem[] = [];
+
+  for (const row of rows) {
+    const chunk = row.slice(0, 5000);
+
+    const docMatch = chunk.match(/id="EntityTitleDocNum_docNumber"[^>]*>([^<]+)</);
+    const docNumber = (docMatch?.[1] || "").trim();
+    if (!docNumber) continue;
+
+    const grtMatch = chunk.match(/class=["']GrtContainer["'][^>]*>([\s\S]*?)<\/div>/);
+    const grtInner = grtMatch?.[1] || "";
+    const grantors = grtInner
+      ? [...grtInner.matchAll(/<p[^>]*>([^<]*)<\/p>/g)].map((m) => (m[1] || "").trim()).filter(Boolean)
+      : [];
+
+    const dateMatch = chunk.match(/id="recDate"[^>]*>([^<]+)</);
+    const recordingDate = dateMatch ? parseRecorderDate((dateMatch[1] || "").trim()) : null;
+
+    const pagesMatch = chunk.match(/id="numOfPages"[^>]*>([^<]+)</);
+    const numPages = (pagesMatch?.[1] || "").trim() || null;
+
+    out.push({ docNumber, recordingDate, grantors, numPages });
+  }
+
+  return out;
+}
+
+function recorderSearchBody(fromDate: string, toDate: string): string {
+  return (
+    `&FromDate=${fromDate}&ToDate=${toDate}&DocumentTypes=210,` +
+    `&DocumentNames=NT TRUSTEE SALE,&ERetrievalGroup=1&SearchMode=3&IsNewSearch=true`
+  );
+}
+
+function recorderPageBody(fromDate: string, toDate: string, page: number): string {
+  return (
+    `PageNum=${page}&DocumentTypes=210&DocumentNames=NT TRUSTEE SALE` +
+    `&FromDate=${fromDate}&ToDate=${toDate}&MapPrior=False&ERetrievalGroup=1&SearchMode=3`
+  );
+}
+
+const RECORDER_AJAX_HEADERS = {
+  "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+  Accept: "*/*",
+  "X-Requested-With": "XMLHttpRequest",
+  Referer: RECORDER_BASE,
+};
+
+export async function scrapeCaliforniaForeclosure(fromDate: string, toDate: string): Promise<Lead[]> {
+  const fromUs = toUsDate(fromDate);
+  const toUs = toUsDate(toDate);
+
+  const page1Html = fetchViaBrightDataWithSession(
+    RECORDER_BASE,
+    RECORDER_AJAX,
+    recorderSearchBody(fromUs, toUs),
+    RECORDER_AJAX_HEADERS,
+  );
+  if (!page1Html) {
+    throw new Error(
+      "Orange CA Foreclosure RecorderWorks: no response (Bright Data proxy credentials missing or the source is unreachable)",
+    );
+  }
+  if (/your session has expired/i.test(page1Html)) {
+    throw new Error("Orange CA Foreclosure RecorderWorks: session cookie was rejected");
+  }
+  const validated = validateHtmlResponse(page1Html, "Orange CA Foreclosure RecorderWorks", 500);
+  if (!validated.ok) {
+    throw new Error(validated.reason || "Orange CA Foreclosure RecorderWorks returned an invalid response");
+  }
+
+  const seenDocs = new Map<string, CaliforniaForeclosureItem>();
+  for (const item of parseRecorderResultRows(page1Html)) {
+    if (!seenDocs.has(item.docNumber)) seenDocs.set(item.docNumber, item);
+  }
+
+  // Keep paging (same session, same Bright Data call — OnPage() reuses the
+  // search already stored server-side) until a page comes back short of a
+  // full page, meaning we've reached the end.
+  let lastPageCount = parseRecorderResultRows(page1Html).length;
+  for (let page = 2; lastPageCount >= RECORDER_PAGE_SIZE && page <= RECORDER_MAX_PAGES; page++) {
+    const pageHtml = fetchViaBrightDataWithSession(
+      RECORDER_BASE,
+      RECORDER_AJAX,
+      recorderPageBody(fromUs, toUs, page),
+      RECORDER_AJAX_HEADERS,
+    );
+    if (!pageHtml || /your session has expired/i.test(pageHtml)) break;
+
+    const pageItems = parseRecorderResultRows(pageHtml);
+    lastPageCount = pageItems.length;
+    if (!lastPageCount) break;
+    for (const item of pageItems) {
+      if (!seenDocs.has(item.docNumber)) seenDocs.set(item.docNumber, item);
+    }
+  }
+
+  const items = [...seenDocs.values()];
+  const leads: Lead[] = [];
+
+  for (let i = 0; i < items.length; i += NAME_LOOKUP_CONCURRENCY) {
+    const batch = items.slice(i, i + NAME_LOOKUP_CONCURRENCY);
+    const splitBatch = batch.map((item) => splitForeclosureGrantors(item.grantors));
+
+    const propertyResults = await Promise.all(
+      splitBatch.map(({ owners }) =>
+        owners.length
+          ? Promise.all(owners.map((name) => lookupOwnerProperties(name, COUNTY, STATE).catch(() => [])))
+          : Promise.resolve([]),
+      ),
+    );
+
+    for (let j = 0; j < batch.length; j++) {
+      const item = batch[j];
+      const split = splitBatch[j];
+      if (!item || !split) continue;
+      const { owners } = split;
+      const perOwnerProperties = propertyResults[j] || [];
+
+      for (let k = 0; k < owners.length; k++) {
+        const ownerName = owners[k];
+        if (!ownerName) continue;
+        const properties = perOwnerProperties[k] || [];
+
+        for (const property of properties) {
+          if (!property.address || !property.mailingAddress || isGovernmentOwner(property.ownerName))
+            continue;
+          if (!personMatchesOwner(ownerName, property.ownerName)) continue;
+
+          const id = makeId(COUNTY, STATE, "Foreclosure", `${item.docNumber}-${property.address}`);
+          if (leads.some((l) => l.id === id)) continue;
+
+          leads.push({
+            id,
+            county: COUNTY,
+            state: STATE,
+            lead_type: "Foreclosure",
+            owner_name: property.ownerName || ownerName,
+            address: property.address,
+            city: property.city || null,
+            zip: property.zip || null,
+            mailing_address: property.mailingAddress,
+            mailing_city: property.mailingCity || null,
+            mailing_state: property.mailingState || null,
+            mailing_zip: property.mailingZip || null,
+            case_number: item.docNumber,
+            filing_date: item.recordingDate,
+            assessed_value: null,
+            tax_year: null,
+            lender: null,
+            loan_amount: null,
+            sale_date: null,
+            sale_amount: null,
+            description: `Orange County CA Foreclosure — Trustee Sale, Document ${item.docNumber}`,
+            source_url: RECORDER_BASE,
+            raw_data: JSON.stringify({
+              docNumber: item.docNumber,
+              recordingDate: item.recordingDate,
+              grantors: item.grantors,
+              numPages: item.numPages,
+            }),
+          });
+        }
+      }
+    }
+  }
+
+  return leads;
+}
+
 export async function scrapeCalifornia(
   county: string,
   fromDate: string,
@@ -443,6 +765,7 @@ export async function scrapeCalifornia(
   const runners: Record<string, () => Promise<Lead[]>> = {
     Bankruptcy: () => scrapeBankruptcy(fromDate, toDate),
     Probate: () => scrapeCaliforniaProbate(fromDate, toDate),
+    Foreclosure: () => scrapeCaliforniaForeclosure(fromDate, toDate),
   };
   const types = leadTypes?.length ? leadTypes : Object.keys(runners);
   const entries = types

@@ -1,6 +1,9 @@
 // @ts-nocheck
 import { spawnSync } from "child_process";
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
+import { unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { logger } from "../utils/logger.js";
 
 export interface Lead {
@@ -326,6 +329,65 @@ function fetchViaBrightDataCurl(url: string, options: RequestInit = {}): string 
   return result.stdout || "";
 }
 
+/**
+ * Some sites require a real session cookie from an initial page load before
+ * their AJAX search endpoint will respond at all — confirmed live against the
+ * OC Clerk-Recorder: a stateless POST alone gets back "your session has
+ * expired," even with the exact correct search parameters. This is NOT a
+ * JS-execution requirement (no browser/rendering needed) — it's a plain
+ * ASP.NET session cookie, so a GET-then-POST curl pair through the same
+ * residential proxy, sharing a cookie jar, is enough. Verified live: this
+ * exact pattern returned real result rows with zero JavaScript involved.
+ */
+export function fetchViaBrightDataWithSession(
+  getUrl: string,
+  postUrl: string,
+  postBody: string,
+  postHeaders: Record<string, string> = {},
+): string {
+  const user = process.env.BRIGHT_DATA_USER;
+  const pass = process.env.BRIGHT_DATA_PASS;
+  if (!user || !pass) return "";
+
+  const proxy = `http://${user}:${pass}@brd.superproxy.io:22225`;
+  const ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36";
+  const cookieJar = join(tmpdir(), `bd-session-${randomBytes(8).toString("hex")}.txt`);
+
+  try {
+    spawnSync(
+      "curl",
+      [
+        "-sSL",
+        "--max-time",
+        "45",
+        "-x",
+        proxy,
+        "-c",
+        cookieJar,
+        "-H",
+        `User-Agent: ${ua}`,
+        getUrl,
+      ],
+      { encoding: "utf8", maxBuffer: 12 * 1024 * 1024 },
+    );
+
+    const args = ["-sSL", "--max-time", "45", "-x", proxy, "-b", cookieJar, "-H", `User-Agent: ${ua}`];
+    for (const [name, value] of Object.entries(postHeaders)) {
+      args.push("-H", `${name}: ${value}`);
+    }
+    args.push("-X", "POST", "--data-raw", postBody, postUrl);
+
+    const result = spawnSync("curl", args, { encoding: "utf8", maxBuffer: 12 * 1024 * 1024 });
+    return result.stdout || "";
+  } finally {
+    try {
+      unlinkSync(cookieJar);
+    } catch {
+      // best-effort cleanup only
+    }
+  }
+}
+
 function needsResidentialProxy(url: string): boolean {
   return (
     url.includes("craigslist.org") ||
@@ -333,7 +395,8 @@ function needsResidentialProxy(url: string): boolean {
     url.includes("plattecountycollector.com") ||
     url.includes("courts.mo.gov/casenet") ||
     url.includes("v2.alacourt.com") ||
-    url.includes("probatect.org")
+    url.includes("probatect.org") ||
+    url.includes("cr.occlerkrecorder.gov")
   );
 }
 
