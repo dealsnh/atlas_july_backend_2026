@@ -28,7 +28,7 @@ import {
   toUsDate,
   validateHtmlResponse,
 } from "./base.js";
-import { isGovernmentOwner, lookupOwnerProperties } from "./assessor.js";
+import { isGovernmentOwner, lookupByAddress, lookupOwnerProperties } from "./assessor.js";
 import { logger } from "../utils/logger.js";
 
 const COUNTY = "Orange";
@@ -750,6 +750,213 @@ export async function scrapeCaliforniaForeclosure(fromDate: string, toDate: stri
   return leads;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Code Violation — Orange County has NO countywide feed; each of its 34
+// incorporated cities runs its own code-enforcement program (unincorporated
+// areas alone are covered by OC Development Services, itself not yet a
+// verified machine-readable source). Two cities confirmed live so far, both
+// via a public ArcGIS FeatureServer synced from the city's own Accela system
+// — no login, no browser, plain HTTP queries. More cities can be added the
+// same way once found and verified; do not assume every OC city has one of
+// these until checked.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ANAHEIM_CODE_ENFORCEMENT_URL =
+  "https://services3.arcgis.com/hPs600I3X0RTaaaq/arcgis/rest/services/CodeEnforcementCasesPublic/FeatureServer/0/query";
+const ANAHEIM_CODE_ENFORCEMENT_SOURCE =
+  "https://data-anaheim.opendata.arcgis.com/datasets/anaheim::recent-code-enforcement-cases-1/about";
+const IRVINE_CODE_ENFORCEMENT_URL =
+  "https://services2.arcgis.com/3mkVbLdbLBFHrfbK/arcgis/rest/services/Code_Enforcement_Cases_AGO/FeatureServer/0/query";
+const IRVINE_CODE_ENFORCEMENT_SOURCE = "https://coi-gis-cityofirvine.hub.arcgis.com/";
+
+/** ArcGIS date fields are epoch milliseconds — an absolute UTC instant, no
+ * ambiguous local-time parsing involved (unlike the Recorder's bare M/D/YYYY
+ * text, which is why that one needed its own direct string parser instead). */
+function arcgisEpochToIso(value: unknown): string | null {
+  const ms = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  return new Date(ms).toISOString().split("T")[0] ?? null;
+}
+
+function arcgisTimestamp(isoDate: string, endOfDay = false): string {
+  return `TIMESTAMP '${isoDate} ${endOfDay ? "23:59:59" : "00:00:00"}'`;
+}
+
+async function queryArcgisFeatureServer(
+  queryUrl: string,
+  where: string,
+  outFields: string,
+): Promise<Array<Record<string, unknown>>> {
+  const params = new URLSearchParams({ where, outFields, returnGeometry: "false", f: "json" });
+  const res = await fetchWithRetry(`${queryUrl}?${params.toString()}`);
+  if (!res.ok) throw new Error(`ArcGIS query HTTP ${res.status}: ${queryUrl}`);
+  const data = (await res.json()) as {
+    features?: Array<{ attributes: Record<string, unknown> }>;
+    error?: { message?: string };
+  };
+  if (data.error) throw new Error(`ArcGIS query error (${queryUrl}): ${data.error.message || "unknown"}`);
+  return (data.features || []).map((f) => f.attributes);
+}
+
+/** Anaheim's own address field is "STREET\nCITY, ST ZIP" on one string. */
+function parseAnaheimAddress(raw: string): { street: string; city: string | null; zip: string | null } {
+  const match = raw.match(/^(.+?)\r?\n([^,]+),\s*[A-Za-z]{2}\.?\s*(\d{5})/);
+  if (match) {
+    return {
+      street: (match[1] || "").trim(),
+      city: (match[2] || "").trim(),
+      zip: (match[3] || "").trim(),
+    };
+  }
+  return { street: raw.trim(), city: null, zip: null };
+}
+
+/**
+ * Anaheim's feed already carries owner name AND address directly (synced from
+ * Accela every 15 minutes) — no county-roll lookup is required to identify
+ * who to contact. The roll is still consulted for the MAILING address (an
+ * absentee owner's mailing address can differ from the situs), falling back
+ * to the situs address itself when no roll match is found — the same
+ * "property owner, mailing falls back to property address" default this
+ * project already uses elsewhere for a living owner with no better data.
+ */
+async function scrapeAnaheimCodeViolation(fromDate: string, toDate: string): Promise<Lead[]> {
+  const where =
+    `casestatus <> 'Closed' AND opendate >= ${arcgisTimestamp(fromDate)}` +
+    ` AND opendate <= ${arcgisTimestamp(toDate, true)}`;
+  const rows = await queryArcgisFeatureServer(
+    ANAHEIM_CODE_ENFORCEMENT_URL,
+    where,
+    "casenumber,casestatus,address,description,opendate,parcel,ownername",
+  );
+
+  const leads: Lead[] = [];
+  for (const row of rows) {
+    const caseNumber = String(row.casenumber || "").trim();
+    const rawAddress = String(row.address || "").trim();
+    const ownerName = String(row.ownername || "").trim();
+    if (!caseNumber || !rawAddress || !ownerName) continue;
+
+    const { street, city, zip } = parseAnaheimAddress(rawAddress);
+    if (!street || isGovernmentOwner(ownerName)) continue;
+
+    let mailingAddress = street;
+    let mailingCity = city;
+    let mailingState = "CA";
+    let mailingZip = zip;
+    try {
+      const rollMatch = await lookupByAddress(street, COUNTY, STATE);
+      if (rollMatch?.mailingAddress) {
+        mailingAddress = rollMatch.mailingAddress;
+        mailingCity = rollMatch.mailingCity || city;
+        mailingState = rollMatch.mailingState || "CA";
+        mailingZip = rollMatch.mailingZip || zip;
+      }
+    } catch {
+      // fall back to situs as mailing
+    }
+
+    leads.push({
+      id: makeId(COUNTY, STATE, "Code Violation", `anaheim-${caseNumber}`),
+      county: COUNTY,
+      state: STATE,
+      lead_type: "Code Violation",
+      owner_name: ownerName,
+      address: street,
+      city: city || "Anaheim",
+      zip,
+      mailing_address: mailingAddress,
+      mailing_city: mailingCity,
+      mailing_state: mailingState,
+      mailing_zip: mailingZip,
+      case_number: caseNumber,
+      filing_date: arcgisEpochToIso(row.opendate),
+      assessed_value: null,
+      tax_year: null,
+      lender: null,
+      loan_amount: null,
+      sale_date: null,
+      sale_amount: null,
+      description: `Anaheim Code Enforcement — ${String(row.description || "").trim() || "case"} (${String(row.casestatus || "").trim()})`,
+      source_url: ANAHEIM_CODE_ENFORCEMENT_SOURCE,
+      raw_data: JSON.stringify(row),
+    });
+  }
+  return leads;
+}
+
+/**
+ * Irvine's feed carries address only, no owner name at all — a county-roll
+ * lookup is REQUIRED here, not optional. A case with no roll match is
+ * skipped rather than uploaded with a blank owner, since there would be
+ * nothing to actually call.
+ */
+async function scrapeIrvineCodeViolation(fromDate: string, toDate: string): Promise<Lead[]> {
+  const where =
+    `USER_Status <> 'Closed' AND USER_Date_opened >= ${arcgisTimestamp(fromDate)}` +
+    ` AND USER_Date_opened <= ${arcgisTimestamp(toDate, true)}`;
+  const rows = await queryArcgisFeatureServer(
+    IRVINE_CODE_ENFORCEMENT_URL,
+    where,
+    "USER_Case_,USER_Topic,USER_Status,USER_Date_opened,USER_FULL_ADDRESS,GroupTopic",
+  );
+
+  const leads: Lead[] = [];
+  for (const row of rows) {
+    const caseNumber = String(row.USER_Case_ || "").trim();
+    const rawAddress = String(row.USER_FULL_ADDRESS || "").trim();
+    if (!caseNumber || !rawAddress) continue;
+
+    let rollMatch: Awaited<ReturnType<typeof lookupByAddress>> = null;
+    try {
+      rollMatch = await lookupByAddress(rawAddress, COUNTY, STATE);
+    } catch {
+      rollMatch = null;
+    }
+    if (!rollMatch?.ownerName || !rollMatch.mailingAddress || isGovernmentOwner(rollMatch.ownerName)) continue;
+
+    const topic = String(row.USER_Topic || row.GroupTopic || "").trim() || "case";
+    leads.push({
+      id: makeId(COUNTY, STATE, "Code Violation", `irvine-${caseNumber}`),
+      county: COUNTY,
+      state: STATE,
+      lead_type: "Code Violation",
+      owner_name: rollMatch.ownerName,
+      address: rollMatch.address || rawAddress,
+      city: rollMatch.city || "Irvine",
+      zip: rollMatch.zip || null,
+      mailing_address: rollMatch.mailingAddress,
+      mailing_city: rollMatch.mailingCity || null,
+      mailing_state: rollMatch.mailingState || "CA",
+      mailing_zip: rollMatch.mailingZip || null,
+      case_number: caseNumber,
+      filing_date: arcgisEpochToIso(row.USER_Date_opened),
+      assessed_value: null,
+      tax_year: null,
+      lender: null,
+      loan_amount: null,
+      sale_date: null,
+      sale_amount: null,
+      description: `Irvine Code Enforcement — ${topic} (${String(row.USER_Status || "").trim()})`,
+      source_url: IRVINE_CODE_ENFORCEMENT_SOURCE,
+      raw_data: JSON.stringify(row),
+    });
+  }
+  return leads;
+}
+
+export async function scrapeCaliforniaCodeViolation(fromDate: string, toDate: string): Promise<Lead[]> {
+  const cities: Array<[string, () => Promise<Lead[]>]> = [
+    ["Anaheim", () => scrapeAnaheimCodeViolation(fromDate, toDate)],
+    ["Irvine", () => scrapeIrvineCodeViolation(fromDate, toDate)],
+  ];
+  const results = await Promise.allSettled(cities.map(([, fn]) => fn()));
+  return settleScraperResults(
+    results,
+    cities.map(([city]) => `Orange CA Code Violation (${city})`),
+  );
+}
+
 export async function scrapeCalifornia(
   county: string,
   fromDate: string,
@@ -766,6 +973,7 @@ export async function scrapeCalifornia(
     Bankruptcy: () => scrapeBankruptcy(fromDate, toDate),
     Probate: () => scrapeCaliforniaProbate(fromDate, toDate),
     Foreclosure: () => scrapeCaliforniaForeclosure(fromDate, toDate),
+    "Code Violation": () => scrapeCaliforniaCodeViolation(fromDate, toDate),
   };
   const types = leadTypes?.length ? leadTypes : Object.keys(runners);
   const entries = types

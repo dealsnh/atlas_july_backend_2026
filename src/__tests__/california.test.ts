@@ -6,6 +6,7 @@ import {
   parseCaliforniaBankruptcyRss,
   parseCaPublicNoticeProbate,
   parseRecorderResultRows,
+  scrapeCaliforniaCodeViolation,
   scrapeCaliforniaForeclosure,
   scrapeCaliforniaProbate,
 } from "../scrapers/california.js";
@@ -111,9 +112,10 @@ const RECORDER_HTML = `<html><body><table>
 </table></body></html>`;
 
 describe("Orange County California scraping configuration", () => {
-  it("enables only the verified Bankruptcy, Probate, Pre-Probate, and Foreclosure lead types", () => {
+  it("enables only the verified Bankruptcy, Probate, Pre-Probate, Foreclosure, and Code Violation lead types", () => {
     expect(resolveCountyLeadTypes({ county: "Orange", name: "Orange", state: "CA" })).toEqual([
       "Foreclosure",
+      "Code Violation",
       "Probate",
       "Pre-Probate",
       "Bankruptcy",
@@ -336,5 +338,148 @@ describe("Orange County California scraping configuration", () => {
       delete process.env.BRIGHT_DATA_USER;
       delete process.env.BRIGHT_DATA_PASS;
     }
+  });
+});
+
+describe("Orange County California Code Violation (Anaheim + Irvine)", () => {
+  // Real field shapes from a live query against each city's public ArcGIS
+  // FeatureServer (2026-09-11) — Anaheim's own feed carries owner name and
+  // address directly (synced from Accela every 15 minutes); Irvine's carries
+  // address only, no owner name at all.
+  const anaheimRow = {
+    casenumber: "COD2026-07683",
+    casestatus: "Received",
+    address: "1415 N Stoneyhaven Ln\nAnaheim, Ca 92801",
+    description: "Building Permit",
+    opendate: Date.UTC(2026, 8, 1),
+    parcel: "07074334",
+    ownername: "Reis, Carl & Pamela",
+  };
+  const irvineRow = {
+    USER_Case_: "00782111-CM",
+    USER_Topic: "Land Use & Zoning",
+    USER_Status: "Citation",
+    USER_Date_opened: Date.UTC(2026, 8, 1),
+    USER_FULL_ADDRESS: "7000 MARINE",
+    GroupTopic: "Land Use & Zoning",
+  };
+  const rollParcel = {
+    features: [
+      {
+        attributes: {
+          OWNER_NAME: "SANTOS MARIA",
+          SITE_ADDR_: "1415",
+          SITE_STREE: "N",
+          SITE_STR_1: "STONEYHAVEN",
+          SITE_STR_2: "LN",
+          SITE_CITY_: "ANAHEIM CA",
+          SITE_ZIP5: "92801",
+          ASSESSMENT: "070-743-34",
+          MAIL_ADDR_: "PO BOX",
+          MAIL_PREFI: "",
+          MAIL_STREE: "9821",
+          MAIL_UNIT_: "",
+          MAIL_SUFFI: "",
+          MAIL_CITY_: "SANTA ANA CA",
+          MAIL_ZIP5: "92711",
+        },
+      },
+    ],
+  };
+
+  function stubFetch(opts: { anaheim?: unknown[]; irvine?: unknown[]; roll?: unknown[] }) {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("CodeEnforcementCasesPublic")) {
+        return new Response(JSON.stringify({ features: (opts.anaheim || []).map((a) => ({ attributes: a })) }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("Code_Enforcement_Cases_AGO")) {
+        return new Response(JSON.stringify({ features: (opts.irvine || []).map((a) => ({ attributes: a })) }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("ocgis.com")) {
+        return new Response(JSON.stringify(opts.roll ? { features: opts.roll } : { features: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+  }
+
+  it("scrapes Anaheim: owner+address come straight from the city feed, mailing enriched from the county roll", async () => {
+    stubFetch({ anaheim: [anaheimRow], roll: rollParcel.features });
+
+    const leads = await scrapeCaliforniaCodeViolation("2026-08-25", "2026-09-03");
+
+    expect(leads).toHaveLength(1);
+    expect(leads[0]).toMatchObject({
+      county: "Orange",
+      state: "CA",
+      lead_type: "Code Violation",
+      owner_name: "Reis, Carl & Pamela",
+      address: "1415 N Stoneyhaven Ln",
+      city: "Anaheim",
+      zip: "92801",
+      case_number: "COD2026-07683",
+      filing_date: "2026-09-01",
+    });
+    // Mailing came from the roll, not just copied from the situs address.
+    expect(leads[0]?.mailing_address).not.toBe(leads[0]?.address);
+  });
+
+  it("scrapes Irvine: no owner name in the feed at all, so the county roll supplies it", async () => {
+    // Must match "7000 MARINE" -- lookupByAddress's own guard requires the
+    // roll's returned situs to actually start with the queried house number,
+    // so Anaheim's mock parcel (a different address) would silently fail here.
+    const irvineRollParcel = {
+      features: [
+        {
+          attributes: {
+            OWNER_NAME: "SANTOS MARIA",
+            SITE_ADDR_: "7000",
+            SITE_STREE: "",
+            SITE_STR_1: "MARINE",
+            SITE_STR_2: "",
+            SITE_CITY_: "IRVINE CA",
+            SITE_ZIP5: "92618",
+            ASSESSMENT: "555-222-11",
+            MAIL_ADDR_: "7000",
+            MAIL_PREFI: "",
+            MAIL_STREE: "MARINE",
+            MAIL_UNIT_: "",
+            MAIL_SUFFI: "",
+            MAIL_CITY_: "IRVINE CA",
+            MAIL_ZIP5: "92618",
+          },
+        },
+      ],
+    };
+    stubFetch({ irvine: [irvineRow], roll: irvineRollParcel.features });
+
+    const leads = await scrapeCaliforniaCodeViolation("2026-08-25", "2026-09-03");
+
+    expect(leads).toHaveLength(1);
+    expect(leads[0]).toMatchObject({
+      county: "Orange",
+      state: "CA",
+      lead_type: "Code Violation",
+      owner_name: "SANTOS MARIA",
+      case_number: "00782111-CM",
+      filing_date: "2026-09-01",
+    });
+  });
+
+  it("skips an Irvine case with no county-roll match rather than uploading a nameless lead", async () => {
+    stubFetch({ irvine: [irvineRow] });
+
+    const leads = await scrapeCaliforniaCodeViolation("2026-08-25", "2026-09-03");
+    expect(leads).toEqual([]);
   });
 });
