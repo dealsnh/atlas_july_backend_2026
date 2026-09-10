@@ -72,20 +72,28 @@ export const COUNTY_DEFAULT_LEAD_TYPES: Record<string, readonly string[]> = {
   // Long-Time Owner omitted: derivable from roll sale dates but not wired as a scan yet.
   "TN:Hamilton": ["Probate", "Pre-Foreclosure", "Code Violation", "Tax Delinquent", "Fire Damage", "Divorce", "Bankruptcy", "Vacant/Abandoned", "FSBO", "Out-of-State Owner", "Absentee Owner", "Obituary"],
   // ── California ──
-  // Orange County, in the client's stated priority order (Foreclosure, Probate,
-  // Pre-Probate, Tax Delinquent, Bankruptcy — Tax Delinquent not yet built):
-  // the OC Clerk-Recorder's Document Type search for trustee-sale filings
-  // (session-gated but needs no browser — a plain GET+POST pair reusing an
-  // ASP.NET session cookie, verified live), capublicnotice.com probate
-  // notices (session-gated, county-filtered on the result's own `location`
-  // field), the roll-derived "still on the tax roll as an estate" scan
-  // (labeled Pre-Probate here, not Probate — CA already has a real
-  // court-filed Probate above, so the roll signal is the earlier, weaker
-  // stage), and Central District bankruptcy RSS — all completed against the
-  // countywide public parcel roll. Other source categories remain
+  // Orange County, in the client's stated priority order (Foreclosure, Code
+  // Violation, Water Shutoff [not built — no lawful per-property source
+  // exists, see below], Tax Delinquent [not yet built], Probate,
+  // Pre-Probate, Bankruptcy): the OC Clerk-Recorder's Document Type search
+  // for trustee-sale filings (session-gated but needs no browser — a plain
+  // GET+POST pair reusing an ASP.NET session cookie, verified live); Code
+  // Violation from two of OC's 34 incorporated cities (Anaheim, Irvine —
+  // OC has no countywide feed, each city runs its own program; more cities
+  // can be added the same way once found and verified, not yet all 34);
+  // capublicnotice.com probate notices (session-gated, county-filtered on
+  // the result's own `location` field); the roll-derived "still on the tax
+  // roll as an estate" scan (labeled Pre-Probate here, not Probate — CA
+  // already has a real court-filed Probate above, so the roll signal is the
+  // earlier, weaker stage); and Central District bankruptcy RSS — all
+  // completed against the countywide public parcel roll where a lookup is
+  // needed. Water Shutoff is deliberately NOT listed: SB 998 only requires
+  // utilities to report an annual aggregate COUNT of disconnections, not a
+  // list of addresses, so there is no lawful path to individual leads from
+  // it regardless of source access. Other source categories remain
   // deliberately unlisted until a lawful source contract and response
   // signature are verified.
-  "CA:Orange": ["Foreclosure", "Probate", "Pre-Probate", "Bankruptcy"],
+  "CA:Orange": ["Foreclosure", "Code Violation", "Probate", "Pre-Probate", "Bankruptcy"],
   // ── Alabama (non-judicial; trustee sale ≈ pre-foreclosure) ──
   // Jefferson (Birmingham) has the only AL Code Violation + Vacant/Abandoned portals.
   "AL:Jefferson": ["Probate", "Pre-Foreclosure", "Code Violation", "Tax Delinquent", "Divorce", "Bankruptcy", "Vacant/Abandoned", "Sheriff Sale", "FSBO", "Obituary"],
