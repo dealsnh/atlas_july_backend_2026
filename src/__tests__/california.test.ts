@@ -406,10 +406,26 @@ describe("Orange County California Code Violation (Anaheim + Irvine + Newport Be
     NEIGHBORHOOD: "West Newport",
   };
 
+  // Real field shapes from a live query against Garden Grove's GeoServer WFS
+  // (2026-09-11, https://geonode.ggcity.org/geoserver/code/ows, feature type
+  // code:open_violations -- NOT the WMS-display name code:violations found
+  // in the portal's own config.yml, which 400s on this endpoint). No owner
+  // name published here either; opened_on is already a clean YYYY-MM-DD
+  // string. GeoJSON shape (properties nested directly), unlike the Esri
+  // "attributes" wrapper the other three cities use.
+  const gardenGroveFeature = {
+    case_id: 176879,
+    address: "11742 Della Ln",
+    address_id: 40344,
+    opened_on: "2026-09-01",
+    citation: "INOPERABLE VEHICLE, STORAGE OF DEBRIS, OVERGROWN VEGETATION",
+  };
+
   function stubFetch(opts: {
     anaheim?: unknown[];
     irvine?: unknown[];
     newportBeach?: unknown[];
+    gardenGrove?: unknown[];
     roll?: unknown[];
   }) {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
@@ -429,6 +445,12 @@ describe("Orange County California Code Violation (Anaheim + Irvine + Newport Be
       if (url.includes("ArcGISOnlineDataGISViewer")) {
         return new Response(
           JSON.stringify({ features: (opts.newportBeach || []).map((a) => ({ attributes: a })) }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("geonode.ggcity.org")) {
+        return new Response(
+          JSON.stringify({ features: (opts.gardenGrove || []).map((p) => ({ properties: p })) }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
       }
@@ -531,6 +553,53 @@ describe("Orange County California Code Violation (Anaheim + Irvine + Newport Be
     });
     // No roll match configured in this test -- mailing falls back to situs.
     expect(leads[0]?.mailing_address).toBe("100 MAIN ST");
+  });
+
+  it("scrapes Garden Grove: no owner name on the feed at all, so the county roll supplies it", async () => {
+    const gardenGroveRollParcel = {
+      features: [
+        {
+          attributes: {
+            OWNER_NAME: "PATEL RAJ",
+            SITE_ADDR_: "11742",
+            SITE_STREE: "",
+            SITE_STR_1: "DELLA",
+            SITE_STR_2: "LN",
+            SITE_CITY_: "GARDEN GROVE CA",
+            SITE_ZIP5: "92840",
+            ASSESSMENT: "091-234-56",
+            MAIL_ADDR_: "11742",
+            MAIL_PREFI: "",
+            MAIL_STREE: "DELLA",
+            MAIL_UNIT_: "",
+            MAIL_SUFFI: "LN",
+            MAIL_CITY_: "GARDEN GROVE CA",
+            MAIL_ZIP5: "92840",
+          },
+        },
+      ],
+    };
+    stubFetch({ gardenGrove: [gardenGroveFeature], roll: gardenGroveRollParcel.features });
+
+    const leads = await scrapeCaliforniaCodeViolation("2026-08-25", "2026-09-03");
+
+    expect(leads).toHaveLength(1);
+    expect(leads[0]).toMatchObject({
+      county: "Orange",
+      state: "CA",
+      lead_type: "Code Violation",
+      owner_name: "PATEL RAJ",
+      case_number: "176879",
+      filing_date: "2026-09-01",
+      city: "GARDEN GROVE",
+    });
+  });
+
+  it("skips a Garden Grove case with no county-roll match rather than uploading a nameless lead", async () => {
+    stubFetch({ gardenGrove: [gardenGroveFeature] });
+
+    const leads = await scrapeCaliforniaCodeViolation("2026-08-25", "2026-09-03");
+    expect(leads).toEqual([]);
   });
 });
 

@@ -1047,11 +1047,105 @@ async function scrapeNewportBeachCodeViolation(fromDate: string, toDate: string)
   return leads;
 }
 
+/**
+ * Garden Grove runs its own custom Leaflet-based map portal (not Esri/
+ * ArcGIS like the other three cities) backed by a real GeoServer WFS
+ * instance. The portal itself never surfaces the endpoint directly — its
+ * <gg-map-portal> web component just points at a `config.yml` alongside the
+ * page (`https://ggcity.org/maps/data-portal/config.yml`), which lists a
+ * "Code Enforcement Layers" group with a `code:violations` WMS layer name.
+ * That WMS name is NOT the real WFS feature-type name, though — GeoServer's
+ * `GetCapabilities` for the `code` workspace shows the actual queryable type
+ * is `code:open_violations` (confirmed live; a query for the WMS-display
+ * name alone 400s with "Feature type code:violations unknown"). No owner
+ * name is published here either — same free county-roll resolution as
+ * every other Orange County scraper. `opened_on` is already a clean
+ * YYYY-MM-DD string, no epoch/timezone parsing needed at all. The layer
+ * itself is server-side pre-filtered to open cases only (there is no
+ * separate "closed" layer to exclude), and GeoServer's CQL_FILTER on
+ * `opened_on` does real server-side date filtering (verified live) so a
+ * daily/weekly scrape only pulls what changed, not the full ~1,745-record
+ * backlog every run.
+ */
+const GARDEN_GROVE_WFS_URL = "https://geonode.ggcity.org/geoserver/code/ows";
+const GARDEN_GROVE_CODE_ENFORCEMENT_SOURCE = "https://ggcity.org/maps/data-portal/";
+
+interface GardenGroveViolationProperties {
+  case_id: number;
+  address: string;
+  opened_on: string;
+  citation: string;
+}
+
+async function scrapeGardenGroveCodeViolation(fromDate: string, toDate: string): Promise<Lead[]> {
+  const params = new URLSearchParams({
+    service: "WFS",
+    version: "2.0.0",
+    request: "GetFeature",
+    typeName: "code:open_violations",
+    outputFormat: "application/json",
+    CQL_FILTER: `opened_on >= '${fromDate}' AND opened_on <= '${toDate}'`,
+  });
+  const res = await fetchWithRetry(`${GARDEN_GROVE_WFS_URL}?${params.toString()}`);
+  if (!res.ok) throw new Error(`Garden Grove WFS HTTP ${res.status}`);
+  const data = (await res.json()) as {
+    features?: Array<{ properties: GardenGroveViolationProperties }>;
+  };
+
+  const leads: Lead[] = [];
+  for (const feature of data.features || []) {
+    const { case_id, address, opened_on, citation } = feature.properties;
+    const street = String(address || "").trim();
+    if (!case_id || !street) continue;
+
+    let rollMatch: Awaited<ReturnType<typeof lookupByAddress>> = null;
+    try {
+      rollMatch = await lookupByAddress(street, COUNTY, STATE);
+    } catch {
+      rollMatch = null;
+    }
+    if (!rollMatch?.ownerName || !rollMatch.mailingAddress || isGovernmentOwner(rollMatch.ownerName))
+      continue;
+
+    const filingDate = /^\d{4}-\d{2}-\d{2}/.test(String(opened_on || ""))
+      ? String(opened_on).slice(0, 10)
+      : null;
+
+    leads.push({
+      id: makeId(COUNTY, STATE, "Code Violation", `garden-grove-${case_id}`),
+      county: COUNTY,
+      state: STATE,
+      lead_type: "Code Violation",
+      owner_name: rollMatch.ownerName,
+      address: rollMatch.address || street,
+      city: rollMatch.city || "Garden Grove",
+      zip: rollMatch.zip || null,
+      mailing_address: rollMatch.mailingAddress,
+      mailing_city: rollMatch.mailingCity || null,
+      mailing_state: rollMatch.mailingState || "CA",
+      mailing_zip: rollMatch.mailingZip || null,
+      case_number: String(case_id),
+      filing_date: filingDate,
+      assessed_value: null,
+      tax_year: null,
+      lender: null,
+      loan_amount: null,
+      sale_date: null,
+      sale_amount: null,
+      description: `Garden Grove Code Enforcement — ${String(citation || "").trim() || "open violation"}`,
+      source_url: GARDEN_GROVE_CODE_ENFORCEMENT_SOURCE,
+      raw_data: JSON.stringify(feature.properties),
+    });
+  }
+  return leads;
+}
+
 export async function scrapeCaliforniaCodeViolation(fromDate: string, toDate: string): Promise<Lead[]> {
   const cities: Array<[string, () => Promise<Lead[]>]> = [
     ["Anaheim", () => scrapeAnaheimCodeViolation(fromDate, toDate)],
     ["Irvine", () => scrapeIrvineCodeViolation(fromDate, toDate)],
     ["Newport Beach", () => scrapeNewportBeachCodeViolation(fromDate, toDate)],
+    ["Garden Grove", () => scrapeGardenGroveCodeViolation(fromDate, toDate)],
   ];
   const results = await Promise.allSettled(cities.map(([, fn]) => fn()));
   return settleScraperResults(
