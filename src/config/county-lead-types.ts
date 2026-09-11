@@ -73,31 +73,44 @@ export const COUNTY_DEFAULT_LEAD_TYPES: Record<string, readonly string[]> = {
   "TN:Hamilton": ["Probate", "Pre-Foreclosure", "Code Violation", "Tax Delinquent", "Fire Damage", "Divorce", "Bankruptcy", "Vacant/Abandoned", "FSBO", "Out-of-State Owner", "Absentee Owner", "Obituary"],
   // ── California ──
   // Orange County, in the client's stated priority order (Foreclosure, Code
-  // Violation, Water Shutoff [not built — no lawful per-property source
-  // exists, see below], Tax Delinquent [not yet built], Probate,
-  // Pre-Probate, Bankruptcy): the OC Clerk-Recorder's Document Type search
-  // for trustee-sale filings (session-gated but needs no browser — a plain
-  // GET+POST pair reusing an ASP.NET session cookie, verified live); Code
-  // Violation from three of OC's 34 incorporated cities (Anaheim, Irvine,
-  // Newport Beach — OC has no countywide feed, each city runs its own
-  // program; more cities can be added the same way once found and verified,
-  // not yet all 34; Garden Grove is a confirmed real source on a bespoke
-  // non-Esri stack, not yet reverse-engineered; Santa Ana, Huntington Beach,
-  // Costa Mesa, Fullerton, and City of Orange were checked and have no free
-  // usable feed);
-  // capublicnotice.com probate notices (session-gated, county-filtered on
-  // the result's own `location` field); the roll-derived "still on the tax
-  // roll as an estate" scan (labeled Pre-Probate here, not Probate — CA
-  // already has a real court-filed Probate above, so the roll signal is the
-  // earlier, weaker stage); and Central District bankruptcy RSS — all
-  // completed against the countywide public parcel roll where a lookup is
-  // needed. Water Shutoff is deliberately NOT listed: SB 998 only requires
+  // Violation, Tax Delinquent, Probate, Pre-Probate, Bankruptcy; Water
+  // Shutoff was eliminated from the roadmap entirely — see below): the OC
+  // Clerk-Recorder's Document Type search for trustee-sale filings
+  // (session-gated but needs no browser — a plain GET+POST pair reusing an
+  // ASP.NET session cookie, verified live); Code Violation from three of
+  // OC's 34 incorporated cities (Anaheim, Irvine, Newport Beach — OC has no
+  // countywide feed, each city runs its own program; more cities can be
+  // added the same way once found and verified, not yet all 34; Garden
+  // Grove is a confirmed real source on a bespoke non-Esri stack, not yet
+  // reverse-engineered; Santa Ana, Huntington Beach, Costa Mesa, Fullerton,
+  // and City of Orange were checked and have no free usable feed); Tax
+  // Delinquent from bid4assets.com's Orange County tax-defaulted property
+  // auction storefront (no login needed to view listings or per-parcel
+  // detail pages, confirmed live — the site's "registration required" gate
+  // is only for the deposit/bidding flow, not for reading the public data;
+  // the county's auction schedule is genuinely irregular, so this reports
+  // whatever is currently posted and still open rather than filtering by
+  // date range like the other types); capublicnotice.com probate notices
+  // (session-gated, county-filtered on the result's own `location` field);
+  // the roll-derived "still on the tax roll as an estate" scan (labeled
+  // Pre-Probate here, not Probate — CA already has a real court-filed
+  // Probate above, so the roll signal is the earlier, weaker stage); and
+  // Central District bankruptcy RSS — all completed against the countywide
+  // public parcel roll where a lookup is needed. Water Shutoff is
+  // deliberately NOT listed and not coming back: SB 998 only requires
   // utilities to report an annual aggregate COUNT of disconnections, not a
   // list of addresses, so there is no lawful path to individual leads from
-  // it regardless of source access. Other source categories remain
-  // deliberately unlisted until a lawful source contract and response
-  // signature are verified.
-  "CA:Orange": ["Foreclosure", "Code Violation", "Probate", "Pre-Probate", "Bankruptcy"],
+  // it regardless of source access — eliminated from the roadmap, not
+  // merely deferred. Other source categories remain deliberately unlisted
+  // until a lawful source contract and response signature are verified.
+  "CA:Orange": [
+    "Foreclosure",
+    "Code Violation",
+    "Tax Delinquent",
+    "Probate",
+    "Pre-Probate",
+    "Bankruptcy",
+  ],
   // ── Alabama (non-judicial; trustee sale ≈ pre-foreclosure) ──
   // Jefferson (Birmingham) has the only AL Code Violation + Vacant/Abandoned portals.
   "AL:Jefferson": ["Probate", "Pre-Foreclosure", "Code Violation", "Tax Delinquent", "Divorce", "Bankruptcy", "Vacant/Abandoned", "Sheriff Sale", "FSBO", "Obituary"],

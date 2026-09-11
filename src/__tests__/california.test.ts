@@ -9,6 +9,7 @@ import {
   scrapeCaliforniaCodeViolation,
   scrapeCaliforniaForeclosure,
   scrapeCaliforniaProbate,
+  scrapeCaliforniaTaxDelinquent,
 } from "../scrapers/california.js";
 
 vi.mock("child_process", () => ({ spawnSync: vi.fn() }));
@@ -112,10 +113,11 @@ const RECORDER_HTML = `<html><body><table>
 </table></body></html>`;
 
 describe("Orange County California scraping configuration", () => {
-  it("enables only the verified Bankruptcy, Probate, Pre-Probate, Foreclosure, and Code Violation lead types", () => {
+  it("enables only the verified Bankruptcy, Probate, Pre-Probate, Foreclosure, Code Violation, and Tax Delinquent lead types", () => {
     expect(resolveCountyLeadTypes({ county: "Orange", name: "Orange", state: "CA" })).toEqual([
       "Foreclosure",
       "Code Violation",
+      "Tax Delinquent",
       "Probate",
       "Pre-Probate",
       "Bankruptcy",
@@ -529,5 +531,155 @@ describe("Orange County California Code Violation (Anaheim + Irvine + Newport Be
     });
     // No roll match configured in this test -- mailing falls back to situs.
     expect(leads[0]?.mailing_address).toBe("100 MAIN ST");
+  });
+});
+
+describe("Orange County California Tax Delinquent (bid4assets.com auction)", () => {
+  function futureDateTime(daysAhead: number): string {
+    const d = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000);
+    return `${d.toISOString().split("T")[0]}T15:00:00`;
+  }
+  function pastDateTime(daysAgo: number): string {
+    const d = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+    return `${d.toISOString().split("T")[0]}T15:00:00`;
+  }
+
+  // Trimmed from a real, live-fetched bid4assets.com/Orange page (2026-09-11)
+  // -- the StorefrontId hidden input and the folder-list's
+  // StorefrontCollectionId field name/shape are real, unmodified.
+  const storefrontHtml = `<html><body>
+    <input type="hidden" name="StorefrontId" value="17023" />
+    <script>var folderData = {"data":{"Data":[{"StorefrontCollectionId":9082,"StorefrontId":17023,"CollectionName":"Group 1"}],"Total":1}};</script>
+  </body></html>`;
+
+  const openItem = {
+    auctionID: 1300001,
+    asset_title: "Orange County, CA: APN: 999-999-99",
+    minimumBid: 42000,
+    bidCloseTime: futureDateTime(30),
+  };
+  const withdrawnItem = {
+    auctionID: 1300002,
+    asset_title: "***Withdrawn***Orange County, CA: APN: 111-111-11",
+    minimumBid: 50000,
+    bidCloseTime: futureDateTime(30),
+  };
+  const closedItem = {
+    auctionID: 1300003,
+    asset_title: "Orange County, CA: APN: 222-222-22",
+    minimumBid: 60000,
+    bidCloseTime: pastDateTime(400),
+  };
+
+  // Trimmed from a real, live-fetched bid4assets.com/auction/index/1200739
+  // detail page (2026-09-11) -- the "Item Specifics - Parcel Information"
+  // table structure, field labels, and markup (bare inline styles on
+  // <strong>, the address cell's embedded <br />) are copied verbatim.
+  function detailHtmlFor(apn: string, street: string, cityLine: string): string {
+    return `<div class="subtitle">Item Specifics - Parcel Information</div>
+      <div class="item-specifics-table"><table><tbody>
+        <tr><th colspan="2">Parcel Information</th></tr>
+        <tr><td><strong style="font-family: 'Open Sans' !important;font-weight: 1000;">APN</strong></td><td style="padding-right:5px;">${apn}</td></tr>
+        <tr><td><strong style="font-family: 'Open Sans' !important;font-weight: 1000;">Legal Description </strong></td><td style="padding-right:5px;">A-TRACT: TEST LOT</td></tr>
+        <tr><td><strong style="font-family: 'Open Sans' !important;font-weight: 1000;">Address</strong></td><td style="padding-right:5px;">${street}<br />${cityLine}</td></tr>
+      </tbody></table></div>`;
+  }
+
+  const rollParcel = {
+    features: [
+      {
+        attributes: {
+          OWNER_NAME: "JOHNSON ROBERT",
+          SITE_ADDR_: "500",
+          SITE_STREE: "E",
+          SITE_STR_1: "CHAPMAN",
+          SITE_STR_2: "AVE",
+          SITE_CITY_: "ORANGE CA",
+          SITE_ZIP5: "92866",
+          ASSESSMENT: "999-999-99",
+          MAIL_ADDR_: "500",
+          MAIL_PREFI: "E",
+          MAIL_STREE: "CHAPMAN",
+          MAIL_UNIT_: "",
+          MAIL_SUFFI: "AVE",
+          MAIL_CITY_: "ORANGE CA",
+          MAIL_ZIP5: "92866",
+        },
+      },
+    ],
+  };
+
+  function stubFetch(opts: {
+    items?: unknown[];
+    detailByAuctionId?: Record<number, string>;
+    roll?: unknown[];
+  }) {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("bid4assets.com/Orange")) {
+        return new Response(storefrontHtml, { status: 200 });
+      }
+      if (url.includes("/api/storefront/auctions/index")) {
+        return new Response(JSON.stringify({ data: opts.items || [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const detailMatch = url.match(/\/auction\/index\/(\d+)/);
+      if (detailMatch) {
+        const id = Number(detailMatch[1]);
+        const html = opts.detailByAuctionId?.[id] || "";
+        return new Response(html, { status: html ? 200 : 404 });
+      }
+      if (url.includes("ocgis.com")) {
+        return new Response(JSON.stringify(opts.roll ? { features: opts.roll } : { features: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+  }
+
+  it("keeps an open, non-withdrawn auction item and resolves owner via the county roll", async () => {
+    stubFetch({
+      items: [openItem, withdrawnItem, closedItem],
+      detailByAuctionId: {
+        [openItem.auctionID]: detailHtmlFor("999-999-99", "500 E CHAPMAN AVE", "ORANGE, CA"),
+      },
+      roll: rollParcel.features,
+    });
+
+    const leads = await scrapeCaliforniaTaxDelinquent();
+
+    expect(leads).toHaveLength(1);
+    expect(leads[0]).toMatchObject({
+      county: "Orange",
+      state: "CA",
+      lead_type: "Tax Delinquent",
+      owner_name: "JOHNSON ROBERT",
+      case_number: "999-999-99",
+      sale_amount: "42000",
+    });
+  });
+
+  it("excludes a withdrawn listing and an already-closed auction", async () => {
+    stubFetch({ items: [withdrawnItem, closedItem], detailByAuctionId: {} });
+
+    const leads = await scrapeCaliforniaTaxDelinquent();
+    expect(leads).toEqual([]);
+  });
+
+  it("skips an item with no county-roll match rather than uploading a nameless lead", async () => {
+    stubFetch({
+      items: [openItem],
+      detailByAuctionId: {
+        [openItem.auctionID]: detailHtmlFor("999-999-99", "500 E CHAPMAN AVE", "ORANGE, CA"),
+      },
+    });
+
+    const leads = await scrapeCaliforniaTaxDelinquent();
+    expect(leads).toEqual([]);
   });
 });
