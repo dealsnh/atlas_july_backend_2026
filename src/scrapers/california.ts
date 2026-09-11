@@ -1060,6 +1060,199 @@ export async function scrapeCaliforniaCodeViolation(fromDate: string, toDate: st
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Tax Delinquent — bid4assets.com, Orange County's tax-defaulted property
+// auction storefront. Verified live: viewing the listing and every parcel's
+// detail page needs NO login or registration at all — the site's documented
+// "registration required" gate is for the deposit/bidding flow, not for
+// reading the public data. The county's own auction schedule is genuinely
+// IRREGULAR (recent ones: June and Sept 2025, nothing fixed/annual), so
+// unlike every other CA lead type here, this one does NOT filter by the
+// passed fromDate/toDate window — those parameters don't map onto "check for
+// new activity since last run" the way they do for a daily notice feed.
+// Instead this reports whatever the county's storefront CURRENTLY shows as
+// posted and still open (bid close date not yet passed); an auction that
+// already closed, or no auction being posted at all right now, both
+// correctly produce zero leads, not an error.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BID4ASSETS_STOREFRONT_URL = "https://www.bid4assets.com/Orange";
+const BID4ASSETS_AUCTIONS_API = "https://www.bid4assets.com/api/storefront/auctions/index";
+const BID4ASSETS_AUCTION_DETAIL_BASE = "https://www.bid4assets.com/auction/index";
+
+interface Bid4AssetsAuctionItem {
+  auctionID: number;
+  asset_title: string;
+  minimumBid: number | null;
+  bidCloseTime: string;
+}
+
+/** The site marks a pulled/paid-off/sold parcel with a text prefix on the
+ * title rather than a documented status-code enum — matching on that text is
+ * more robust than guessing what an undocumented statusID value means. */
+function isWithdrawnListing(title: string): boolean {
+  return /\*{2,}\s*(withdrawn|sold|removed|cancel(l)?ed)/i.test(title);
+}
+
+/** bidCloseTime arrives as a bare "YYYY-MM-DDTHH:MM:SS" with no timezone
+ * marker. This is only ever used as a coarse "is this auction still open"
+ * gate over a period of WEEKS, not a same-day precision check, so a direct
+ * string-prefix compare (no Date-object round trip at all) sidesteps the
+ * whole local-timezone class of bug the Recorder/Probate scrapers hit. */
+function bid4AssetsCloseDateIso(bidCloseTime: string): string | null {
+  const datePart = bidCloseTime.split("T")[0];
+  return datePart && /^\d{4}-\d{2}-\d{2}$/.test(datePart) ? datePart : null;
+}
+
+function isStillOpen(bidCloseTime: string): boolean {
+  const closeDate = bid4AssetsCloseDateIso(bidCloseTime);
+  if (!closeDate) return false;
+  const today = new Date().toISOString().split("T")[0]!;
+  return closeDate >= today;
+}
+
+async function fetchBid4AssetsStorefrontGroups(): Promise<{ storefrontId: string; groupIds: string[] }> {
+  const res = await fetchWithRetry(BID4ASSETS_STOREFRONT_URL);
+  if (!res.ok) throw new Error(`bid4assets Orange storefront HTTP ${res.status}`);
+  const html = await res.text();
+
+  const storefrontMatch = html.match(/name="StorefrontId"\s+value="(\d+)"/);
+  if (!storefrontMatch) {
+    throw new Error(
+      "bid4assets Orange storefront: could not find StorefrontId — page structure may have changed",
+    );
+  }
+  const groupIds = [...new Set([...html.matchAll(/"StorefrontCollectionId":(\d+)/g)].map((m) => m[1]!))];
+  if (!groupIds.length) {
+    throw new Error(
+      "bid4assets Orange storefront: no auction collection groups found — page structure may have changed",
+    );
+  }
+  return { storefrontId: storefrontMatch[1]!, groupIds };
+}
+
+async function fetchBid4AssetsGroupItems(
+  storefrontId: string,
+  groupId: string,
+): Promise<Bid4AssetsAuctionItem[]> {
+  const url = `${BID4ASSETS_AUCTIONS_API}?take=9999&skip=0&page=1&pageSize=9999`;
+  const res = await fetchWithRetry(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ storefrontId: Number(storefrontId), storefrontCollectionId: Number(groupId) }),
+  });
+  if (!res.ok) throw new Error(`bid4assets auctions/index HTTP ${res.status}`);
+  const data = (await res.json()) as { data?: Bid4AssetsAuctionItem[] };
+  return data.data || [];
+}
+
+/** Parses the "Item Specifics - Parcel Information" block on a parcel's
+ * detail page. No owner name is published anywhere on this site — address
+ * is the only identifying field, resolved to an owner via the free county
+ * parcel roll afterward, same as every other Orange County scraper here. */
+function parseBid4AssetsDetail(
+  html: string,
+): { apn: string | null; legalDescription: string | null; street: string | null; city: string | null } {
+  const sectionStart = html.indexOf("Item Specifics - Parcel Information");
+  const section = sectionStart >= 0 ? html.slice(sectionStart, sectionStart + 2000) : html;
+
+  const apnMatch = section.match(/<strong[^>]*>APN<\/strong>[\s\S]{0,150}?<td[^>]*>([^<]+)<\/td>/i);
+  const legalMatch = section.match(
+    /<strong[^>]*>Legal Description\s*<\/strong>[\s\S]{0,150}?<td[^>]*>([^<]+)<\/td>/i,
+  );
+  const addrMatch = section.match(
+    /<strong[^>]*>Address<\/strong>[\s\S]{0,150}?<td[^>]*>([^<]+)<br\s*\/?>\s*([^<]+)<\/td>/i,
+  );
+  const street = addrMatch?.[1]?.trim() || null;
+  const cityLine = addrMatch?.[2]?.trim() || null;
+  const city = cityLine ? cityLine.replace(/,\s*CA\.?$/i, "").trim() : null;
+
+  return {
+    apn: apnMatch?.[1]?.trim() || null,
+    legalDescription: legalMatch?.[1]?.trim() || null,
+    street,
+    city,
+  };
+}
+
+export async function scrapeCaliforniaTaxDelinquent(): Promise<Lead[]> {
+  const { storefrontId, groupIds } = await fetchBid4AssetsStorefrontGroups();
+
+  const allItems: Bid4AssetsAuctionItem[] = [];
+  for (const groupId of groupIds) {
+    const items = await fetchBid4AssetsGroupItems(storefrontId, groupId);
+    allItems.push(...items);
+  }
+
+  const openItems = allItems.filter(
+    (item) => !isWithdrawnListing(item.asset_title) && isStillOpen(item.bidCloseTime),
+  );
+
+  const leads: Lead[] = [];
+  for (let i = 0; i < openItems.length; i += NAME_LOOKUP_CONCURRENCY) {
+    const batch = openItems.slice(i, i + NAME_LOOKUP_CONCURRENCY);
+    const detailPages = await Promise.all(
+      batch.map((item) =>
+        fetchWithRetry(`${BID4ASSETS_AUCTION_DETAIL_BASE}/${item.auctionID}`)
+          .then((res) => (res.ok ? res.text() : ""))
+          .catch(() => ""),
+      ),
+    );
+
+    for (let j = 0; j < batch.length; j++) {
+      const item = batch[j]!;
+      const html = detailPages[j] || "";
+      if (!html) continue;
+
+      const { apn, legalDescription, street, city } = parseBid4AssetsDetail(html);
+      if (!apn || !street) continue;
+
+      let rollMatch: Awaited<ReturnType<typeof lookupByAddress>> = null;
+      try {
+        rollMatch = await lookupByAddress(street, COUNTY, STATE);
+      } catch {
+        rollMatch = null;
+      }
+      if (!rollMatch?.ownerName || !rollMatch.mailingAddress || isGovernmentOwner(rollMatch.ownerName))
+        continue;
+
+      const closeDateIso = bid4AssetsCloseDateIso(item.bidCloseTime);
+      const minBid = item.minimumBid != null ? String(item.minimumBid) : null;
+
+      leads.push({
+        id: makeId(COUNTY, STATE, "Tax Delinquent", `bid4assets-${item.auctionID}`),
+        county: COUNTY,
+        state: STATE,
+        lead_type: "Tax Delinquent",
+        owner_name: rollMatch.ownerName,
+        address: rollMatch.address || street,
+        city: rollMatch.city || city || null,
+        zip: rollMatch.zip || null,
+        mailing_address: rollMatch.mailingAddress,
+        mailing_city: rollMatch.mailingCity || null,
+        mailing_state: rollMatch.mailingState || "CA",
+        mailing_zip: rollMatch.mailingZip || null,
+        case_number: apn,
+        filing_date: null,
+        assessed_value: null,
+        tax_year: null,
+        lender: null,
+        loan_amount: null,
+        sale_date: closeDateIso,
+        sale_amount: minBid,
+        description:
+          `Orange County CA Tax-Defaulted Property Auction — APN ${apn}` +
+          (legalDescription ? ` — ${legalDescription}` : "") +
+          (minBid ? ` — Min Bid $${minBid}` : ""),
+        source_url: `${BID4ASSETS_AUCTION_DETAIL_BASE}/${item.auctionID}`,
+        raw_data: JSON.stringify({ item, apn, legalDescription, street, city }),
+      });
+    }
+  }
+
+  return leads;
+}
+
 export async function scrapeCalifornia(
   county: string,
   fromDate: string,
@@ -1077,6 +1270,7 @@ export async function scrapeCalifornia(
     Probate: () => scrapeCaliforniaProbate(fromDate, toDate),
     Foreclosure: () => scrapeCaliforniaForeclosure(fromDate, toDate),
     "Code Violation": () => scrapeCaliforniaCodeViolation(fromDate, toDate),
+    "Tax Delinquent": () => scrapeCaliforniaTaxDelinquent(),
   };
   const types = leadTypes?.length ? leadTypes : Object.keys(runners);
   const entries = types
