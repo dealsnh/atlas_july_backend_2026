@@ -78,9 +78,13 @@ export const COUNTY_DEFAULT_LEAD_TYPES: Record<string, readonly string[]> = {
   // Pre-Probate, Bankruptcy): the OC Clerk-Recorder's Document Type search
   // for trustee-sale filings (session-gated but needs no browser — a plain
   // GET+POST pair reusing an ASP.NET session cookie, verified live); Code
-  // Violation from two of OC's 34 incorporated cities (Anaheim, Irvine —
-  // OC has no countywide feed, each city runs its own program; more cities
-  // can be added the same way once found and verified, not yet all 34);
+  // Violation from three of OC's 34 incorporated cities (Anaheim, Irvine,
+  // Newport Beach — OC has no countywide feed, each city runs its own
+  // program; more cities can be added the same way once found and verified,
+  // not yet all 34; Garden Grove is a confirmed real source on a bespoke
+  // non-Esri stack, not yet reverse-engineered; Santa Ana, Huntington Beach,
+  // Costa Mesa, Fullerton, and City of Orange were checked and have no free
+  // usable feed);
   // capublicnotice.com probate notices (session-gated, county-filtered on
   // the result's own `location` field); the roll-derived "still on the tax
   // roll as an estate" scan (labeled Pre-Probate here, not Probate — CA

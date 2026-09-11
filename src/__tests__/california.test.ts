@@ -341,7 +341,7 @@ describe("Orange County California scraping configuration", () => {
   });
 });
 
-describe("Orange County California Code Violation (Anaheim + Irvine)", () => {
+describe("Orange County California Code Violation (Anaheim + Irvine + Newport Beach)", () => {
   // Real field shapes from a live query against each city's public ArcGIS
   // FeatureServer (2026-09-11) — Anaheim's own feed carries owner name and
   // address directly (synced from Accela every 15 minutes); Irvine's carries
@@ -386,8 +386,30 @@ describe("Orange County California Code Violation (Anaheim + Irvine)", () => {
       },
     ],
   };
+  // Real field shapes from a live query against Newport Beach's own ArcGIS
+  // Server (2026-09-11, layer 17 of ArcGISOnlineDataGISViewer) -- like
+  // Anaheim, owner name (CASE_NAME, "LAST, FIRST") and address (ADDS) both
+  // come straight from the feed. This city hosts its own ArcGIS Server
+  // rather than ArcGIS Online's shared infra, so the live scraper reaches it
+  // via fetchBlockedPage (Bright Data) -- irrelevant here since BRIGHT_DATA_*
+  // is unset in tests and fetchBlockedPage falls through to plain fetch.
+  const newportBeachRow = {
+    CASENUMBER: "I26-4521",
+    STATUS: "CITATION",
+    ADDS: "100 MAIN ST",
+    DESCRIPTION: "SUBSTANDARD HOUSING",
+    CASE_NAME: "GARCIA, MARIA",
+    CASE_TYPE: "SUBSTANDARD HOUSING",
+    OPEN_DATE: Date.UTC(2026, 8, 1),
+    NEIGHBORHOOD: "West Newport",
+  };
 
-  function stubFetch(opts: { anaheim?: unknown[]; irvine?: unknown[]; roll?: unknown[] }) {
+  function stubFetch(opts: {
+    anaheim?: unknown[];
+    irvine?: unknown[];
+    newportBeach?: unknown[];
+    roll?: unknown[];
+  }) {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url.includes("CodeEnforcementCasesPublic")) {
@@ -401,6 +423,12 @@ describe("Orange County California Code Violation (Anaheim + Irvine)", () => {
           status: 200,
           headers: { "content-type": "application/json" },
         });
+      }
+      if (url.includes("ArcGISOnlineDataGISViewer")) {
+        return new Response(
+          JSON.stringify({ features: (opts.newportBeach || []).map((a) => ({ attributes: a })) }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
       }
       if (url.includes("ocgis.com")) {
         return new Response(JSON.stringify(opts.roll ? { features: opts.roll } : { features: [] }), {
@@ -481,5 +509,25 @@ describe("Orange County California Code Violation (Anaheim + Irvine)", () => {
 
     const leads = await scrapeCaliforniaCodeViolation("2026-08-25", "2026-09-03");
     expect(leads).toEqual([]);
+  });
+
+  it("scrapes Newport Beach: owner+address come straight from the city's own ArcGIS server", async () => {
+    stubFetch({ newportBeach: [newportBeachRow] });
+
+    const leads = await scrapeCaliforniaCodeViolation("2026-08-25", "2026-09-03");
+
+    expect(leads).toHaveLength(1);
+    expect(leads[0]).toMatchObject({
+      county: "Orange",
+      state: "CA",
+      lead_type: "Code Violation",
+      owner_name: "GARCIA, MARIA",
+      address: "100 MAIN ST",
+      city: "Newport Beach",
+      case_number: "I26-4521",
+      filing_date: "2026-09-01",
+    });
+    // No roll match configured in this test -- mailing falls back to situs.
+    expect(leads[0]?.mailing_address).toBe("100 MAIN ST");
   });
 });

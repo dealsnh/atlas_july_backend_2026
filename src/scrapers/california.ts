@@ -20,6 +20,7 @@
 
 import {
   Lead,
+  fetchBlockedPage,
   fetchViaBrightDataWithSession,
   fetchWithRetry,
   formatDate,
@@ -768,6 +769,15 @@ const ANAHEIM_CODE_ENFORCEMENT_SOURCE =
 const IRVINE_CODE_ENFORCEMENT_URL =
   "https://services2.arcgis.com/3mkVbLdbLBFHrfbK/arcgis/rest/services/Code_Enforcement_Cases_AGO/FeatureServer/0/query";
 const IRVINE_CODE_ENFORCEMENT_SOURCE = "https://coi-gis-cityofirvine.hub.arcgis.com/";
+// Newport Beach hosts its own ArcGIS Server rather than ArcGIS Online's shared
+// infrastructure (unlike Anaheim/Irvine above) — same class of block as the
+// Recorder site, direct connections from a non-residential IP time out. Query
+// through fetchBlockedPage (routes via Bright Data, see needsResidentialProxy
+// in base.ts) rather than the plain fetchWithRetry the other two cities use.
+const NEWPORT_BEACH_CODE_ENFORCEMENT_URL =
+  "https://nbgis.newportbeachca.gov/arcgis/rest/services/ArcGISOnlineDataGISViewer/FeatureServer/17/query";
+const NEWPORT_BEACH_CODE_ENFORCEMENT_SOURCE =
+  "https://nbgis.newportbeachca.gov/gispub/Dashboards/CodeCasesDash.htm";
 
 /** ArcGIS date fields are epoch milliseconds — an absolute UTC instant, no
  * ambiguous local-time parsing involved (unlike the Recorder's bare M/D/YYYY
@@ -791,6 +801,24 @@ async function queryArcgisFeatureServer(
   const res = await fetchWithRetry(`${queryUrl}?${params.toString()}`);
   if (!res.ok) throw new Error(`ArcGIS query HTTP ${res.status}: ${queryUrl}`);
   const data = (await res.json()) as {
+    features?: Array<{ attributes: Record<string, unknown> }>;
+    error?: { message?: string };
+  };
+  if (data.error) throw new Error(`ArcGIS query error (${queryUrl}): ${data.error.message || "unknown"}`);
+  return (data.features || []).map((f) => f.attributes);
+}
+
+/** Same as queryArcgisFeatureServer, routed through fetchBlockedPage for a
+ * city-hosted (not ArcGIS-Online-hosted) server that blocks datacenter IPs. */
+async function queryArcgisFeatureServerBlocked(
+  queryUrl: string,
+  where: string,
+  outFields: string,
+): Promise<Array<Record<string, unknown>>> {
+  const params = new URLSearchParams({ where, outFields, returnGeometry: "false", f: "json" });
+  const body = await fetchBlockedPage(`${queryUrl}?${params.toString()}`);
+  if (!body) throw new Error(`ArcGIS query returned no response: ${queryUrl}`);
+  const data = JSON.parse(body) as {
     features?: Array<{ attributes: Record<string, unknown> }>;
     error?: { message?: string };
   };
@@ -945,10 +973,85 @@ async function scrapeIrvineCodeViolation(fromDate: string, toDate: string): Prom
   return leads;
 }
 
+/**
+ * Newport Beach's feed, like Anaheim's, already carries owner name (CASE_NAME,
+ * "LAST, FIRST[...]") and a street address (ADDS) directly — no county-roll
+ * lookup required to identify who to contact. No city/zip field exists on
+ * this layer at all, so both are filled in (city hardcoded, zip via the
+ * roll) rather than left as an unexplained gap. STATUS values verified live:
+ * CLOSED and VOID are done; NOTICE ISSUED, INVESTIGATING CASES, and CITATION
+ * are active.
+ */
+async function scrapeNewportBeachCodeViolation(fromDate: string, toDate: string): Promise<Lead[]> {
+  const where =
+    `STATUS NOT IN ('CLOSED','VOID') AND OPEN_DATE >= ${arcgisTimestamp(fromDate)}` +
+    ` AND OPEN_DATE <= ${arcgisTimestamp(toDate, true)}`;
+  const rows = await queryArcgisFeatureServerBlocked(
+    NEWPORT_BEACH_CODE_ENFORCEMENT_URL,
+    where,
+    "CASENUMBER,STATUS,ADDS,DESCRIPTION,CASE_NAME,CASE_TYPE,OPEN_DATE,NEIGHBORHOOD",
+  );
+
+  const leads: Lead[] = [];
+  for (const row of rows) {
+    const caseNumber = String(row.CASENUMBER || "").trim();
+    const street = String(row.ADDS || "").trim();
+    const ownerName = String(row.CASE_NAME || "").trim();
+    if (!caseNumber || !street || !ownerName || isGovernmentOwner(ownerName)) continue;
+
+    let mailingAddress = street;
+    let mailingCity: string | null = "Newport Beach";
+    let mailingState = "CA";
+    let mailingZip: string | null = null;
+    let zip: string | null = null;
+    try {
+      const rollMatch = await lookupByAddress(street, COUNTY, STATE);
+      if (rollMatch?.mailingAddress) {
+        mailingAddress = rollMatch.mailingAddress;
+        mailingCity = rollMatch.mailingCity || mailingCity;
+        mailingState = rollMatch.mailingState || "CA";
+        mailingZip = rollMatch.mailingZip || null;
+        zip = rollMatch.zip || null;
+      }
+    } catch {
+      // fall back to situs as mailing
+    }
+
+    const caseType = String(row.CASE_TYPE || row.DESCRIPTION || "").trim() || "case";
+    leads.push({
+      id: makeId(COUNTY, STATE, "Code Violation", `newport-beach-${caseNumber}`),
+      county: COUNTY,
+      state: STATE,
+      lead_type: "Code Violation",
+      owner_name: ownerName,
+      address: street,
+      city: "Newport Beach",
+      zip,
+      mailing_address: mailingAddress,
+      mailing_city: mailingCity,
+      mailing_state: mailingState,
+      mailing_zip: mailingZip,
+      case_number: caseNumber,
+      filing_date: arcgisEpochToIso(row.OPEN_DATE),
+      assessed_value: null,
+      tax_year: null,
+      lender: null,
+      loan_amount: null,
+      sale_date: null,
+      sale_amount: null,
+      description: `Newport Beach Code Enforcement — ${caseType} (${String(row.STATUS || "").trim()})`,
+      source_url: NEWPORT_BEACH_CODE_ENFORCEMENT_SOURCE,
+      raw_data: JSON.stringify(row),
+    });
+  }
+  return leads;
+}
+
 export async function scrapeCaliforniaCodeViolation(fromDate: string, toDate: string): Promise<Lead[]> {
   const cities: Array<[string, () => Promise<Lead[]>]> = [
     ["Anaheim", () => scrapeAnaheimCodeViolation(fromDate, toDate)],
     ["Irvine", () => scrapeIrvineCodeViolation(fromDate, toDate)],
+    ["Newport Beach", () => scrapeNewportBeachCodeViolation(fromDate, toDate)],
   ];
   const results = await Promise.allSettled(cities.map(([, fn]) => fn()));
   return settleScraperResults(
