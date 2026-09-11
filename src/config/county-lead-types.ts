@@ -78,12 +78,14 @@ export const COUNTY_DEFAULT_LEAD_TYPES: Record<string, readonly string[]> = {
   // Clerk-Recorder's Document Type search for trustee-sale filings
   // (session-gated but needs no browser — a plain GET+POST pair reusing an
   // ASP.NET session cookie, verified live); Code Violation from three of
-  // OC's 34 incorporated cities (Anaheim, Irvine, Newport Beach — OC has no
-  // countywide feed, each city runs its own program; more cities can be
-  // added the same way once found and verified, not yet all 34; Garden
-  // Grove is a confirmed real source on a bespoke non-Esri stack, not yet
-  // reverse-engineered; Santa Ana, Huntington Beach, Costa Mesa, Fullerton,
-  // and City of Orange were checked and have no free usable feed); Tax
+  // OC's 34 incorporated cities (Anaheim, Irvine, Newport Beach, Garden
+  // Grove — OC has no countywide feed, each city runs its own program; more
+  // cities can be added the same way once found and verified, not yet all
+  // 34; Garden Grove's own custom Leaflet/GeoServer stack was
+  // reverse-engineered from its map portal's config.yml, not Esri-based
+  // like the other three; Santa Ana, Huntington Beach, Costa Mesa,
+  // Fullerton, and City of Orange were checked and have no free usable
+  // feed); Tax
   // Delinquent from bid4assets.com's Orange County tax-defaulted property
   // auction storefront (no login needed to view listings or per-parcel
   // detail pages, confirmed live — the site's "registration required" gate
