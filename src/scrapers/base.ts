@@ -396,7 +396,8 @@ function needsResidentialProxy(url: string): boolean {
     url.includes("courts.mo.gov/casenet") ||
     url.includes("v2.alacourt.com") ||
     url.includes("probatect.org") ||
-    url.includes("cr.occlerkrecorder.gov")
+    url.includes("cr.occlerkrecorder.gov") ||
+    url.includes("nbgis.newportbeachca.gov")
   );
 }
 
