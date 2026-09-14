@@ -11,6 +11,8 @@ export interface AppSettings {
   bright_data_user: string;
   bright_data_pass: string;
   attom_api_key: string;
+  google_maps_api_key: string;
+  anthropic_api_key: string;
   daily_scrape_paused: string;
 }
 
@@ -29,6 +31,8 @@ export const SETTINGS_KEYS: SettingsKey[] = [
   "bright_data_user",
   "bright_data_pass",
   "attom_api_key",
+  "google_maps_api_key",
+  "anthropic_api_key",
   "daily_scrape_paused",
 ];
 

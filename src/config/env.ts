@@ -23,6 +23,8 @@ const envSchema = z.object({
   BRIGHT_DATA_USER: z.string().optional(),
   BRIGHT_DATA_PASS: z.string().optional(),
   ATTOM_API_KEY: z.string().optional(),
+  GOOGLE_MAPS_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
   SKIP_TRACE_KEY: z.string().optional(),
   SKIP_TRACE_API_URL: z.string().url().optional(),
   SKIP_TRACE_PROVIDER: z.enum(["tracerfy", "generic"]).optional(),

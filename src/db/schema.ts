@@ -102,6 +102,29 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_raw_leads_run ON raw_leads(scrape_run_id);
   CREATE INDEX IF NOT EXISTS idx_raw_leads_county ON raw_leads(county, state);
   CREATE INDEX IF NOT EXISTS idx_raw_leads_promoted ON raw_leads(promoted_to_lead);
+
+  CREATE TABLE IF NOT EXISTS property_condition_cache (
+    address                TEXT PRIMARY KEY,
+    score                  INTEGER NOT NULL,
+    condition              TEXT NOT NULL,
+    roof_score             INTEGER NOT NULL,
+    exterior_score         INTEGER NOT NULL,
+    landscape_score        INTEGER NOT NULL,
+    notes                  TEXT NOT NULL,
+    satellite_image_base64 TEXT,
+    street_view_image_base64 TEXT,
+    street_view_available  BOOLEAN NOT NULL DEFAULT FALSE,
+    analyzed_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_property_condition_cache_analyzed_at
+    ON property_condition_cache(analyzed_at);
+`;
+
+/** Cache entries older than this are stale and get purged by the daily cleanup cron. */
+export const PROPERTY_CONDITION_CACHE_TTL_SQL = `
+  DELETE FROM property_condition_cache
+  WHERE analyzed_at < NOW() - INTERVAL '3 months'
 `;
 
 export const CLEANUP_JUNK_LEADS_SQL = `

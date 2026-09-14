@@ -38,6 +38,8 @@ export const settingsSchema = z
     bright_data_user: z.string().optional(),
     bright_data_pass: z.string().optional(),
     attom_api_key: z.string().optional(),
+    google_maps_api_key: z.string().optional(),
+    anthropic_api_key: z.string().optional(),
     daily_scrape_paused: z.enum(BOOLEAN_STRING).optional(),
   })
   .strict();
@@ -86,4 +88,8 @@ export const enrichLeadsSchema = z.object({
   county: z.string().optional(),
   state: z.string().length(2).optional(),
   limit: z.coerce.number().int().positive().max(5000).optional(),
+});
+
+export const propertyConditionAnalyzeSchema = z.object({
+  address: z.string().trim().min(5).max(300),
 });

@@ -21,6 +21,8 @@ export async function getSettings(): Promise<AppSettings> {
     bright_data_user: stored.bright_data_user ?? env.BRIGHT_DATA_USER ?? "",
     bright_data_pass: stored.bright_data_pass ?? env.BRIGHT_DATA_PASS ?? "",
     attom_api_key: stored.attom_api_key ?? env.ATTOM_API_KEY ?? "",
+    google_maps_api_key: stored.google_maps_api_key ?? env.GOOGLE_MAPS_API_KEY ?? "",
+    anthropic_api_key: stored.anthropic_api_key ?? env.ANTHROPIC_API_KEY ?? "",
     daily_scrape_paused: stored.daily_scrape_paused ?? "false",
   };
 }

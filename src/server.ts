@@ -5,6 +5,7 @@ import { createApp } from "./app.js";
 import { clientConfig } from "./config/constants.js";
 import { env } from "./config/env.js";
 import { closeDb, initDb } from "./db/connection.js";
+import { startPropertyConditionCacheCleanupCron } from "./services/property-condition.service.js";
 import { startDailyCron } from "./services/scrape.service.js";
 import { syncRuntimeConfig } from "./services/settings.service.js";
 import { logger } from "./utils/logger.js";
@@ -40,6 +41,8 @@ export async function startServer(): Promise<Server> {
           brightData: env.BRIGHT_DATA_USER ? "configured" : "not set",
           skipTrace: env.SKIP_TRACE_KEY ? "configured" : "not set",
           attom: env.ATTOM_API_KEY ? "configured" : "not set",
+          googleMaps: env.GOOGLE_MAPS_API_KEY ? "configured" : "not set",
+          anthropic: env.ANTHROPIC_API_KEY ? "configured" : "not set",
           smtp: env.SMTP_HOST ? "configured" : "not set",
           apiKey: env.API_KEY ? "configured" : "not set",
           jwt: env.JWT_SECRET ? "configured" : "not set",
@@ -59,6 +62,7 @@ export async function startServer(): Promise<Server> {
       );
 
       startDailyCron();
+      startPropertyConditionCacheCleanupCron();
       resolve();
     });
   });
