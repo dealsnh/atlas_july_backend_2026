@@ -11,6 +11,8 @@ export async function syncRuntimeConfig(): Promise<void> {
   if (settings.bright_data_user) process.env.BRIGHT_DATA_USER = settings.bright_data_user;
   if (settings.bright_data_pass) process.env.BRIGHT_DATA_PASS = settings.bright_data_pass;
   if (settings.attom_api_key) process.env.ATTOM_API_KEY = settings.attom_api_key;
+  if (settings.google_maps_api_key) process.env.GOOGLE_MAPS_API_KEY = settings.google_maps_api_key;
+  if (settings.anthropic_api_key) process.env.ANTHROPIC_API_KEY = settings.anthropic_api_key;
   if (settings.skip_trace_key) process.env.SKIP_TRACE_KEY = settings.skip_trace_key;
   if (env.SKIP_TRACE_API_URL) process.env.SKIP_TRACE_API_URL = env.SKIP_TRACE_API_URL;
   if (env.SKIP_TRACE_PROVIDER) process.env.SKIP_TRACE_PROVIDER = env.SKIP_TRACE_PROVIDER;
@@ -34,11 +36,15 @@ export async function getMaskedSettings() {
     bright_data_user: s.bright_data_user || "",
     bright_data_pass: s.bright_data_pass ? SECRET_MASK : "",
     attom_api_key: s.attom_api_key ? SECRET_MASK : "",
+    google_maps_api_key: s.google_maps_api_key ? SECRET_MASK : "",
+    anthropic_api_key: s.anthropic_api_key ? SECRET_MASK : "",
     smtp_configured: !!(s.smtp_host && s.smtp_user && s.smtp_pass && !isPlaceholder(s.smtp_pass)),
     scraper_api_configured: !!s.scraper_api_key,
     skip_trace_configured: !!s.skip_trace_key,
     bright_data_configured: !!(s.bright_data_user && s.bright_data_pass),
     attom_configured: !!s.attom_api_key,
+    google_maps_configured: !!s.google_maps_api_key,
+    anthropic_configured: !!s.anthropic_api_key,
     daily_scrape_paused: s.daily_scrape_paused === "true",
   };
 }

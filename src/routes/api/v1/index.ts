@@ -4,6 +4,7 @@ import { asyncHandler } from "../../../utils/async-handler.js";
 import adminRoutes from "./admin.routes.js";
 import authRoutes from "./auth.routes.js";
 import leadsRoutes from "./leads.routes.js";
+import propertyConditionRoutes from "./property-condition.routes.js";
 import scrapeRoutes from "./scrape.routes.js";
 import settingsRoutes from "./settings.routes.js";
 import statsRoutes from "./stats.routes.js";
@@ -18,5 +19,6 @@ router.use("/stats", statsRoutes);
 router.use("/settings", settingsRoutes);
 router.use("/scrape", scrapeRoutes);
 router.use("/admin", adminRoutes);
+router.use("/property-condition", propertyConditionRoutes);
 
 export default router;
